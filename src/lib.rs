@@ -17,9 +17,14 @@ pub mod mercury;
 pub mod validator;
 pub mod snapshot;
 pub mod flow_graph;
+pub mod rewards;
 
 pub use cascade::CascadeMempool;
 pub use mercury::MercuryProtocol;
 pub use validator::{ValidatorSet, ValidatorInfo};
 pub use snapshot::{SnapshotManager, SnapshotCertificate};
 pub use flow_graph::FlowGraph;
+pub use rewards::{
+    FuelFeeCollector, RewardDistributor, CycleRewardsManager,
+    ValidatorReward, TransactionFee,
+};

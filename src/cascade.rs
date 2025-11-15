@@ -11,9 +11,9 @@
 //! - Automatic batch broadcasting with retry logic
 //! - Real-time metrics tracking
 
-use crate::flow_graph::{FlowGraph, FlowGraphError};
+use crate::flow_graph::FlowGraph;
 use silver_core::{
-    BatchID, Certificate, Error, Result, Signature, Transaction, TransactionBatch,
+    BatchID, Certificate, Error, Result, Transaction, TransactionBatch,
     TransactionDigest, ValidatorID, ValidatorSignature,
 };
 use silver_crypto::KeyPair;

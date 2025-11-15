@@ -10,12 +10,12 @@
 //! - Efficient traversal for consensus ordering
 //! - Concurrent access with fine-grained locking
 
-use silver_core::{BatchID, Certificate, Error, Result, TransactionBatch, ValidatorID};
+use silver_core::{BatchID, Certificate, Error, Result, TransactionBatch};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 /// Flow graph error types

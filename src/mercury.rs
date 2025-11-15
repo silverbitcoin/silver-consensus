@@ -13,7 +13,7 @@
 use crate::flow_graph::FlowGraph;
 use crate::validator::ValidatorSet;
 use silver_core::{
-    BatchID, Certificate, Error, Result, Snapshot, SnapshotDigest, StateDigest,
+    Error, Result, Snapshot, SnapshotDigest, StateDigest,
     Transaction, TransactionBatch, TransactionDigest, ValidatorID, ValidatorMetadata, ValidatorSignature,
 };
 use silver_crypto::KeyPair;
@@ -21,11 +21,11 @@ use silver_storage::ObjectStore;
 
 use dashmap::DashMap;
 use parking_lot::RwLock;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{mpsc, Mutex as AsyncMutex, RwLock as AsyncRwLock};
-use tokio::time::{interval, sleep};
+use tokio::sync::{mpsc, RwLock as AsyncRwLock};
+use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
 /// Target snapshot interval (milliseconds)
@@ -523,7 +523,7 @@ impl MercuryProtocol {
             *current_snapshot.write() = sequence_number;
 
             // Mark batches as finalized in flow graph
-            let mut graph = flow_graph.write().await;
+            let graph = flow_graph.write().await;
             for _tx_digest in &transaction_digests {
                 // Find batch containing this transaction and mark as finalized
                 // (simplified - in production would track batch-transaction mapping)
@@ -1009,8 +1009,8 @@ impl MercuryProtocol {
         info!("Starting partition recovery");
 
         let start_time = Instant::now();
-        let mut recovered_batches = 0;
-        let mut recovered_snapshots = 0;
+        let recovered_batches = 0;
+        let recovered_snapshots = 0;
 
         // Get current snapshot height
         let current_height = self.current_snapshot_height();

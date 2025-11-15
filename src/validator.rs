@@ -8,9 +8,8 @@
 use silver_core::{Error, Result, SilverAddress, ValidatorID, ValidatorMetadata};
 use dashmap::DashMap;
 use parking_lot::RwLock;
-use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Validator information
 #[derive(Debug, Clone)]
