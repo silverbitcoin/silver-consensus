@@ -15,16 +15,54 @@
 pub mod cascade;
 pub mod mercury;
 pub mod validator;
+pub mod validator_keys;
+pub mod validator_tiers;
+pub mod staking;
+pub mod delegation;
+pub mod commission;
+pub mod validator_ops;
 pub mod snapshot;
 pub mod flow_graph;
 pub mod rewards;
+pub mod upgrade;
+pub mod activation;
+pub mod compatibility;
+pub mod optimizations; // OPTIMIZATION: Consensus optimizations (Task 35.4)
 
 pub use cascade::CascadeMempool;
 pub use mercury::MercuryProtocol;
 pub use validator::{ValidatorSet, ValidatorInfo};
+pub use validator_keys::{
+    ValidatorKeyManager, ValidatorKeySet, ValidatorPrivateKey,
+    EncryptedValidatorKeys, KeyRotationRecord,
+};
+pub use validator_tiers::{
+    ValidatorTier, ValidatorTierInfo, ValidatorTierManager,
+    TierChangeEvent,
+};
+pub use staking::{
+    StakingManager, ValidatorStake, StakeDeposit, UnstakingRequest,
+    MIN_STAKE_AMOUNT, UNBONDING_PERIOD_SECS,
+};
+pub use delegation::{
+    DelegationManager, Delegation, UndelegationRequest, ValidatorDelegationInfo,
+    MIN_DELEGATION_AMOUNT, MAX_DELEGATED_STAKE_PER_VALIDATOR,
+};
+pub use commission::{
+    CommissionManager, CommissionRate, CommissionRateChange, ValidatorCommissionInfo,
+    MIN_COMMISSION_RATE, MAX_COMMISSION_RATE, COMMISSION_CHANGE_NOTICE_PERIOD,
+};
+pub use validator_ops::{ValidatorOperations, DOWNTIME_THRESHOLD};
 pub use snapshot::{SnapshotManager, SnapshotCertificate};
 pub use flow_graph::FlowGraph;
 pub use rewards::{
     FuelFeeCollector, RewardDistributor, CycleRewardsManager,
     ValidatorReward, TransactionFee,
 };
+pub use upgrade::{UpgradeManager, UpgradeStats};
+pub use activation::{ActivationCoordinator, ActivationStats};
+pub use compatibility::{CompatibilityChecker, CompatibilityStats, FeatureExtractor};
+pub use optimizations::{
+    BatchPipeline, FlowGraphCache, SnapshotOptimizer,
+    PipelineStats, CacheStats, SnapshotStats,
+}; // OPTIMIZATION exports

@@ -170,8 +170,8 @@ impl ValidatorOperations {
         &mut self,
         validator_id: &ValidatorID,
         amount: u64,
-    ) -> Result<crate::UnstakingRequest> {
-        let request = self.staking_manager.request_unstake(validator_id, amount)?;
+    ) -> Result<(crate::UnstakingRequest, Option<crate::TierChangeEvent>)> {
+        let (request, tier_event) = self.staking_manager.request_unstake(validator_id, amount)?;
 
         // Check if validator still meets minimum stake
         if !self.staking_manager.meets_minimum_stake(validator_id) {
@@ -181,7 +181,14 @@ impl ValidatorOperations {
             );
         }
 
-        Ok(request)
+        if let Some(ref event) = tier_event {
+            info!(
+                "Validator {} tier changed from {} to {} after unstaking",
+                validator_id, event.from_tier, event.to_tier
+            );
+        }
+
+        Ok((request, tier_event))
     }
 
     /// Get validator info
@@ -266,7 +273,7 @@ mod tests {
     #[test]
     fn test_validator_registration() {
         let mut ops = ValidatorOperations::new();
-        let metadata = create_test_validator(1, 1_000_000);
+        let metadata = create_test_validator(1, 50_000); // Silver tier
         let validator_id = metadata.id();
 
         let result = ops.register_validator(metadata, vec![1u8; 64]);
@@ -337,15 +344,16 @@ mod tests {
     #[test]
     fn test_unstaking() {
         let mut ops = ValidatorOperations::new();
-        let metadata = create_test_validator(1, 2_000_000);
+        let metadata = create_test_validator(1, 500_000); // Platinum tier
         let validator_id = metadata.id();
 
         ops.register_validator(metadata, vec![1u8; 64]).unwrap();
 
-        // Request unstaking
-        let request = ops.request_unstake(&validator_id, 500_000).unwrap();
+        // Request unstaking (should downgrade to Gold)
+        let (request, tier_event) = ops.request_unstake(&validator_id, 400_000).unwrap();
+        assert!(tier_event.is_some()); // Tier changed
         assert!(!request.completed);
-        assert_eq!(ops.get_validator_stake(&validator_id), 1_500_000);
+        assert_eq!(ops.get_validator_stake(&validator_id), 100_000);
     }
 
     #[test]

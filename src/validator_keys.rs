@@ -180,6 +180,9 @@ pub struct KeyRotationRecord {
     pub reason: String,
 }
 
+/// Validator key manager
+///
+/// Manages validator keys with encryption, rotation, and secure storage
 pub struct ValidatorKeyManager {
     key_dir: PathBuf,
     current_keys: Option<ValidatorKeySet>,
@@ -187,6 +190,10 @@ pub struct ValidatorKeyManager {
 }
 
 impl ValidatorKeyManager {
+    /// Create a new validator key manager
+    ///
+    /// # Arguments
+    /// * `key_dir` - Directory to store encrypted keys
     pub fn new<P: AsRef<Path>>(key_dir: P) -> Result<Self> {
         let key_dir = key_dir.as_ref().to_path_buf();
         
@@ -206,6 +213,10 @@ impl ValidatorKeyManager {
         Ok(manager)
     }
 
+    /// Load validator keys from encrypted storage
+    ///
+    /// # Arguments
+    /// * `password` - Password to decrypt the keys
     pub fn load_keys(&mut self, password: &str) -> Result<()> {
         let key_file = self.key_dir.join("validator_keys.enc");
         
@@ -274,6 +285,11 @@ impl ValidatorKeyManager {
         Ok(())
     }
 
+    /// Save validator keys to encrypted storage
+    ///
+    /// # Arguments
+    /// * `key_set` - The key set to save
+    /// * `password` - Password to encrypt the keys
     pub fn save_keys(&self, key_set: &ValidatorKeySet, password: &str) -> Result<()> {
         let key_file = self.key_dir.join("validator_keys.enc");
         info!("Saving validator keys to {}", key_file.display());
@@ -329,6 +345,13 @@ impl ValidatorKeyManager {
         Ok(())
     }
 
+    /// Rotate validator keys
+    ///
+    /// Generates new keys and saves rotation history
+    ///
+    /// # Arguments
+    /// * `password` - Password to encrypt the new keys
+    /// * `reason` - Reason for key rotation
     pub fn rotate_keys(&mut self, password: &str, reason: String) -> Result<ValidatorKeySet> {
         info!("Rotating validator keys: {}", reason);
 
@@ -357,10 +380,12 @@ impl ValidatorKeyManager {
         Ok(new_key_set)
     }
 
+    /// Get current validator keys
     pub fn current_keys(&self) -> Option<&ValidatorKeySet> {
         self.current_keys.as_ref()
     }
 
+    /// Get key rotation history
     pub fn rotation_history(&self) -> &[KeyRotationRecord] {
         &self.rotation_history
     }

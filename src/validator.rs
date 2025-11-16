@@ -324,7 +324,7 @@ mod tests {
         // 2 validators = 2/3 stake = quorum
         let val1 = create_test_validator(1, 1_000_000).id();
         let val2 = create_test_validator(2, 1_000_000).id();
-        assert!(set.has_quorum(&[val1, val2]));
+        assert!(set.has_quorum(&[val1.clone(), val2]));
 
         // 1 validator = 1/3 stake = no quorum
         assert!(!set.has_quorum(&[val1]));
