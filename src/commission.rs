@@ -9,7 +9,7 @@ use silver_core::{Error, Result, ValidatorID};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, warn};
+use tracing::info;
 
 /// Minimum commission rate (5% = 500 basis points)
 pub const MIN_COMMISSION_RATE: u16 = 500;
