@@ -384,7 +384,7 @@ pub struct UpgradeStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use silver_core::SignatureScheme;
+    use silver_core::{SignatureScheme, SilverAddress, Signature};
 
     fn create_test_proposal(activation_cycle: u64) -> UpgradeProposal {
         let version = ProtocolVersion::new(2, 0);

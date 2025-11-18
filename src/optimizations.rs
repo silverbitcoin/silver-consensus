@@ -345,6 +345,7 @@ impl FlowGraphCache {
 /// - Cached intermediate results
 pub struct SnapshotOptimizer {
     /// Cache of intermediate state roots
+    #[allow(dead_code)]
     state_root_cache: Arc<DashMap<u64, SnapshotDigest>>,
     
     /// Statistics

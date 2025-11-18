@@ -330,11 +330,11 @@ mod tests {
         let sender = SilverAddress::new([1u8; 64]);
         let data = TransactionData {
             sender,
-            fuel_payment: silver_core::ObjectRef {
-                object_id: silver_core::ObjectID::new([0u8; 64]),
-                version: 1,
-                digest: silver_core::TransactionDigest::new([0u8; 64]),
-            },
+            fuel_payment: silver_core::ObjectRef::new(
+                silver_core::ObjectID::new([0u8; 64]),
+                silver_core::SequenceNumber::new(1),
+                silver_core::TransactionDigest::new([0u8; 64]),
+            ),
             fuel_budget: 1000,
             fuel_price: 1000,
             kind: TransactionKind::CompositeChain(vec![Command::TransferObjects {

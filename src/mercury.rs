@@ -960,7 +960,7 @@ impl MercuryProtocol {
         let has_quorum = active_stake * 3 > total_stake * 2;
 
         // Calculate participation rates
-        let mut participating_count = 0;
+        let mut _participating_count = 0;
         let mut total_participation_rate = 0.0;
 
         for validator in &active_validators {
@@ -968,7 +968,7 @@ impl MercuryProtocol {
             total_participation_rate += rate;
             if rate > 0.5 {
                 // Consider validator participating if >50% participation
-                participating_count += 1;
+                _participating_count += 1;
             }
         }
 
@@ -1258,6 +1258,8 @@ pub struct NetworkHealth {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use silver_storage::RocksDatabase;
+    use std::sync::Arc;
 
     #[test]
     fn test_mercury_config_default() {
@@ -1281,7 +1283,9 @@ mod tests {
         let validator_set = ValidatorSet::new();
         let flow_graph = FlowGraph::new();
         let execution_engine = ExecutionEngine::new();
-        let store = ObjectStore::new("test_db").unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let db = Arc::new(RocksDatabase::open(temp_dir.path()).unwrap());
+        let store = ObjectStore::new(db);
 
         let mercury = MercuryProtocol::new(
             config,

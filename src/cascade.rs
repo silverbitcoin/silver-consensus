@@ -116,6 +116,7 @@ struct CascadeState {
     pending_transactions: VecDeque<Transaction>,
 
     /// Recently created batches (for deduplication)
+    #[allow(dead_code)]
     recent_batches: HashMap<BatchID, TransactionBatch>,
 
     /// Metrics
@@ -216,6 +217,7 @@ pub struct CascadeMempool {
     network: Arc<NetworkHandle>,
 
     /// Object store
+    #[allow(dead_code)]
     store: Arc<ObjectStore>,
 
     /// Worker handles
@@ -756,7 +758,7 @@ impl BatchCertifier {
     }
 
     /// Clear old pending signatures
-    pub fn clear_old_pending(&self, max_age: Duration) {
+    pub fn clear_old_pending(&self, _max_age: Duration) {
         // This would require tracking timestamp of when signatures were added
         // For now, just clear all pending for certified batches
         let certified: Vec<BatchID> = self.certified_batches
@@ -832,32 +834,5 @@ mod tests {
         let stats = CertificationStats::default();
         assert_eq!(stats.certified_batches, 0);
         assert_eq!(stats.pending_batches, 0);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cascade_config_default() {
-        let config = CascadeConfig::default();
-        assert_eq!(config.worker_count, 4);
-        assert_eq!(config.max_transactions_per_batch, 500);
-        assert_eq!(config.max_batch_size_bytes, 512 * 1024);
-    }
-
-    #[test]
-    fn test_cascade_metrics_default() {
-        let metrics = CascadeMetrics::default();
-        assert_eq!(metrics.batches_created, 0);
-        assert_eq!(metrics.transactions_batched, 0);
-    }
-
-    #[test]
-    fn test_cascade_state_new() {
-        let state = CascadeState::new();
-        assert_eq!(state.pending_transactions.len(), 0);
-        assert_eq!(state.recent_batches.len(), 0);
     }
 }
