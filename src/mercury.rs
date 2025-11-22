@@ -92,23 +92,112 @@ pub struct MercuryMetrics {
     pub failed_snapshots: u64,
 }
 
-/// Execution engine stub (will be replaced with real implementation)
-pub struct ExecutionEngine;
+/// Execution engine for Mercury consensus
+pub struct ExecutionEngine {
+    /// Transaction executor
+    executor: Arc<silver_execution::TransactionExecutor>,
+    
+    /// Object store for state
+    object_store: Arc<silver_storage::ObjectStore>,
+    
+    /// Fuel schedule
+    fuel_schedule: silver_execution::fuel::FuelSchedule,
+}
 
 impl ExecutionEngine {
     /// Create a new execution engine
-    pub fn new() -> Self {
-        Self
+    pub fn new(
+        executor: Arc<silver_execution::TransactionExecutor>,
+        object_store: Arc<silver_storage::ObjectStore>,
+    ) -> Self {
+        Self {
+            executor,
+            object_store,
+            fuel_schedule: silver_execution::fuel::FuelSchedule::default(),
+        }
     }
 
-    /// Execute transactions (stub)
-    pub async fn execute_transactions(&self, _transactions: &[Transaction]) -> Result<Vec<()>> {
-        Ok(vec![])
+    /// Execute transactions and return effects
+    pub async fn execute_transactions(
+        &self,
+        transactions: &[Transaction],
+    ) -> Result<Vec<silver_execution::effects::TransactionEffects>> {
+        let mut effects = Vec::new();
+
+        for tx in transactions {
+            // Validate transaction
+            let validator = silver_execution::verifier::TransactionValidator::new(
+                self.object_store.clone()
+            );
+            
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            
+            validator.validate_transaction(tx, current_time, 0)
+                .map_err(|e| MercuryError::ExecutionFailed(e.to_string()))?;
+
+            // Execute transaction
+            let tx_effects = self.executor.execute(tx)
+                .await
+                .map_err(|e| MercuryError::ExecutionFailed(e.to_string()))?;
+
+            effects.push(tx_effects);
+        }
+
+        Ok(effects)
     }
 
-    /// Compute state root (stub)
+    /// Compute state root from current state
     pub async fn compute_state_root(&self) -> Result<StateDigest> {
-        Ok(StateDigest::new([0u8; 64]))
+        // Compute Blake3 hash of all objects in state
+        let mut hasher = blake3::Hasher::new();
+
+        // Get all objects from storage
+        let objects = self.object_store.get_all_objects()
+            .map_err(|e| MercuryError::ExecutionFailed(format!("Failed to get objects: {}", e)))?;
+
+        // Sort objects by ID for deterministic hashing
+        let mut sorted_objects = objects;
+        sorted_objects.sort_by(|a, b| a.id.cmp(&b.id));
+
+        // Hash each object
+        for obj in sorted_objects {
+            let obj_bytes = bcs::to_bytes(&obj)
+                .map_err(|e| MercuryError::ExecutionFailed(format!("Failed to serialize object: {}", e)))?;
+            hasher.update(&obj_bytes);
+        }
+
+        // Get final hash
+        let hash = hasher.finalize();
+        let mut digest_bytes = [0u8; 64];
+        digest_bytes.copy_from_slice(hash.as_bytes());
+
+        Ok(StateDigest::new(digest_bytes))
+    }
+
+    /// Verify transaction effects
+    pub fn verify_effects(
+        &self,
+        tx: &Transaction,
+        effects: &silver_execution::effects::TransactionEffects,
+    ) -> Result<()> {
+        // Verify effects digest matches transaction
+        let expected_digest = tx.digest();
+        if effects.transaction_digest != expected_digest {
+            return Err(MercuryError::ExecutionFailed(
+                "Effects digest mismatch".to_string()
+            ));
+        }
+
+        // Verify effects status
+        match effects.status {
+            silver_execution::effects::ExecutionStatus::Success => Ok(()),
+            silver_execution::effects::ExecutionStatus::Failure { ref error } => {
+                Err(MercuryError::ExecutionFailed(error.clone()))
+            }
+        }
     }
 }
 
@@ -523,10 +612,13 @@ impl MercuryProtocol {
             *current_snapshot.write() = sequence_number;
 
             // Mark batches as finalized in flow graph
-            let graph = flow_graph.write().await;
-            for _tx_digest in &transaction_digests {
+            let mut graph = flow_graph.write().await;
+            for tx_digest in &transaction_digests {
                 // Find batch containing this transaction and mark as finalized
-                // (simplified - in production would track batch-transaction mapping)
+                if let Some(batch_id) = graph.find_batch_for_transaction(tx_digest) {
+                    graph.mark_batch_finalized(&batch_id, sequence_number)?;
+                    debug!("Marked batch {} as finalized in snapshot {}", batch_id, sequence_number);
+                }
             }
             drop(graph);
 

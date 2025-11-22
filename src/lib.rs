@@ -29,10 +29,16 @@ pub mod upgrade;
 pub mod activation;
 pub mod compatibility;
 pub mod optimizations; // OPTIMIZATION: Consensus optimizations (Task 35.4)
+pub mod slashing;
+pub mod downtime_tracker;
+pub mod validator_activation;
+pub mod key_rotation;
+pub mod commission_manager;
+pub mod validator_monitoring;
 
 pub use cascade::CascadeMempool;
 pub use mercury::MercuryProtocol;
-pub use validator::{ValidatorSet, ValidatorInfo};
+pub use validator::{ValidatorSet, ValidatorInfo, ValidatorSetChangeEvent};
 pub use validator_keys::{
     ValidatorKeyManager, ValidatorKeySet, ValidatorPrivateKey,
     EncryptedValidatorKeys, KeyRotationRecord,
@@ -54,7 +60,7 @@ pub use commission::{
     MIN_COMMISSION_RATE, MAX_COMMISSION_RATE, COMMISSION_CHANGE_NOTICE_PERIOD,
 };
 pub use validator_ops::{ValidatorOperations, DOWNTIME_THRESHOLD};
-pub use snapshot::{SnapshotManager, SnapshotCertificate};
+pub use snapshot::{SnapshotManager, SnapshotCertificate, ValidatorSignatureInfo};
 pub use flow_graph::FlowGraph;
 pub use rewards::{
     FuelFeeCollector, RewardDistributor, CycleRewardsManager,
@@ -67,3 +73,25 @@ pub use optimizations::{
     BatchPipeline, FlowGraphCache, SnapshotOptimizer,
     PipelineStats, CacheStats, SnapshotStats,
 }; // OPTIMIZATION exports
+pub use slashing::{
+    SlashingManager, SlashingConfig, JailRecord, JailReason, SlashEvent,
+};
+pub use downtime_tracker::{
+    DowntimeTracker, DowntimeConfig, ValidatorDowntimeRecord, DowntimeEvent, DowntimeEventType,
+};
+pub use validator_activation::{
+    ValidatorActivationManager, ActivationConfig, ValidatorActivationRecord, ActivationRequest,
+    ValidatorStatus, ActivationEvent, ActivationEventType, ActivationRequestType, ActivationRequestStatus,
+};
+pub use key_rotation::{
+    KeyRotationManager, KeyRotationConfig, KeyRecord, KeyStatus, KeyRotationRequest,
+    KeyRotationRequestStatus, KeyRotationEvent, KeyRotationEventType,
+};
+pub use commission_manager::{
+    CommissionManager, CommissionConfig, CommissionRate, CommissionChangeRequest,
+    ValidatorCommissionInfo,
+};
+pub use validator_monitoring::{
+    ValidatorMonitor, ValidatorMetrics, PerformanceAlert, AlertType, AlertSeverity,
+    MonitoringConfig, HealthStatus, Status,
+};

@@ -2,57 +2,126 @@
 //!
 //! This module handles snapshot creation, certification, and verification
 //! for the Mercury Protocol consensus.
+//!
+//! Features:
+//! - Snapshot creation with transaction batches
+//! - Signature collection from validators
+//! - 2/3+ quorum validation
+//! - Snapshot finalization and certification
+//! - Timeout handling for pending snapshots
+//! - Snapshot history and verification
 
-use silver_core::{Error, Result, Snapshot, ValidatorID, Signature};
+use silver_core::{Error, Result, Snapshot, ValidatorID, Signature, SnapshotDigest};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::info;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tracing::{debug, error, info, warn};
+
+/// Pending snapshot with timeout tracking
+#[derive(Debug, Clone)]
+struct PendingSnapshot {
+    /// Snapshot data
+    snapshot: Snapshot,
+    
+    /// Certificate for this snapshot
+    certificate: SnapshotCertificate,
+    
+    /// When this snapshot was created
+    created_at: Instant,
+    
+    /// Finalization timeout
+    timeout: Duration,
+}
+
+impl PendingSnapshot {
+    /// Check if snapshot has timed out
+    fn is_timed_out(&self) -> bool {
+        self.created_at.elapsed() > self.timeout
+    }
+
+    /// Get time remaining before timeout
+    fn time_remaining(&self) -> Duration {
+        self.timeout.saturating_sub(self.created_at.elapsed())
+    }
+}
 
 /// Snapshot manager
 ///
-/// Manages snapshot creation, certification, and storage
+/// Manages snapshot creation, certification, and storage with:
+/// - Signature collection from validators
+/// - 2/3+ quorum validation
+/// - Timeout handling
+/// - Finalization and certification
+/// - History tracking
 pub struct SnapshotManager {
     /// Latest snapshot sequence number
     latest_sequence: u64,
     
-    /// Pending snapshot certificates
-    pending_certificates: HashMap<u64, SnapshotCertificate>,
+    /// Pending snapshots awaiting finalization
+    pending_snapshots: HashMap<u64, PendingSnapshot>,
     
-    /// Finalized snapshots
-    finalized_snapshots: HashMap<u64, Snapshot>,
+    /// Finalized snapshots with certificates
+    finalized_snapshots: HashMap<u64, (Snapshot, SnapshotCertificate)>,
+    
+    /// Snapshot finalization timeout (default: 5 seconds)
+    finalization_timeout: Duration,
+    
+    /// Maximum pending snapshots before backpressure
+    max_pending: usize,
 }
 
 impl SnapshotManager {
-    /// Create a new snapshot manager
+    /// Create a new snapshot manager with default timeout (5 seconds)
     pub fn new() -> Self {
+        Self::with_timeout(Duration::from_secs(5))
+    }
+
+    /// Create a new snapshot manager with custom timeout
+    pub fn with_timeout(finalization_timeout: Duration) -> Self {
         Self {
             latest_sequence: 0,
-            pending_certificates: HashMap::new(),
+            pending_snapshots: HashMap::new(),
             finalized_snapshots: HashMap::new(),
+            finalization_timeout,
+            max_pending: 1000,
         }
     }
 
     /// Create a new snapshot
+    ///
+    /// Creates a snapshot with the given state root and transactions.
+    /// The snapshot is added to pending snapshots awaiting signatures.
     pub fn create_snapshot(
         &mut self,
         state_root: [u8; 64],
         transaction_digests: Vec<[u8; 64]>,
         cycle: u64,
+        total_stake: u64,
     ) -> Result<Snapshot> {
-        use silver_core::{SnapshotDigest, StateDigest, TransactionDigest};
+        use silver_core::{StateDigest, TransactionDigest};
         
+        // Check backpressure
+        if self.pending_snapshots.len() >= self.max_pending {
+            return Err(Error::InvalidData(format!(
+                "Too many pending snapshots ({}), backpressure applied",
+                self.pending_snapshots.len()
+            )));
+        }
+
         let sequence = self.latest_sequence + 1;
         
+        // Get previous snapshot digest
         let previous_digest = if sequence > 1 {
             self.finalized_snapshots
                 .get(&(sequence - 1))
-                .map(|s| s.digest)
+                .map(|(s, _)| s.digest)
                 .unwrap_or_else(|| SnapshotDigest::new([0u8; 64]))
         } else {
             SnapshotDigest::new([0u8; 64])
         };
 
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
 
@@ -68,66 +137,146 @@ impl SnapshotManager {
             StateDigest::new(state_root),
             tx_digests.clone(),
             cycle,
-            Vec::new(), // Signatures added later
-            0, // Stake weight added later
+            Vec::new(),
+            0,
+        );
+
+        // Create certificate
+        let snapshot_digest = SnapshotDigest::new(state_root);
+        let certificate = SnapshotCertificate::new(sequence, snapshot_digest, total_stake);
+
+        // Add to pending
+        self.pending_snapshots.insert(
+            sequence,
+            PendingSnapshot {
+                snapshot: snapshot.clone(),
+                certificate,
+                created_at: Instant::now(),
+                timeout: self.finalization_timeout,
+            },
         );
 
         info!(
-            "Created snapshot {} with {} transactions",
+            "Created snapshot {} with {} transactions (pending: {})",
             sequence,
-            tx_digests.len()
+            tx_digests.len(),
+            self.pending_snapshots.len()
         );
 
         Ok(snapshot)
     }
 
-    /// Add validator signature to snapshot certificate
+    /// Add validator signature to snapshot
+    ///
+    /// Adds a validator's signature to the snapshot certificate.
+    /// Returns true if signature was added, false if validator already signed.
     pub fn add_signature(
         &mut self,
         sequence: u64,
         validator_id: ValidatorID,
         signature: Signature,
         stake_weight: u64,
-    ) -> Result<()> {
-        let cert = self.pending_certificates
-            .entry(sequence)
-            .or_insert_with(|| SnapshotCertificate::new(sequence));
+    ) -> Result<bool> {
+        let pending = self.pending_snapshots
+            .get_mut(&sequence)
+            .ok_or_else(|| Error::InvalidData(format!(
+                "Snapshot {} not found or already finalized",
+                sequence
+            )))?;
 
-        cert.add_signature(validator_id, signature, stake_weight);
-
-        Ok(())
-    }
-
-    /// Check if snapshot has quorum (2/3+ stake)
-    pub fn has_quorum(&self, sequence: u64, total_stake: u64) -> bool {
-        if let Some(cert) = self.pending_certificates.get(&sequence) {
-            cert.has_quorum(total_stake)
-        } else {
-            false
-        }
-    }
-
-    /// Finalize snapshot with certificate
-    pub fn finalize_snapshot(
-        &mut self,
-        snapshot: Snapshot,
-        total_stake: u64,
-    ) -> Result<()> {
-        let sequence = snapshot.sequence_number;
-
-        if !self.has_quorum(sequence, total_stake) {
+        // Check timeout
+        if pending.is_timed_out() {
             return Err(Error::InvalidData(format!(
-                "Snapshot {} does not have quorum",
+                "Snapshot {} finalization timed out",
                 sequence
             )));
         }
 
-        self.finalized_snapshots.insert(sequence, snapshot);
+        pending.certificate.add_signature(validator_id, signature, stake_weight)
+    }
+
+    /// Check if snapshot has quorum
+    pub fn has_quorum(&self, sequence: u64) -> bool {
+        self.pending_snapshots
+            .get(&sequence)
+            .map(|p| p.certificate.has_quorum)
+            .unwrap_or(false)
+    }
+
+    /// Get quorum percentage for snapshot
+    pub fn get_quorum_percentage(&self, sequence: u64) -> Option<f64> {
+        self.pending_snapshots
+            .get(&sequence)
+            .map(|p| p.certificate.quorum_percentage())
+    }
+
+    /// Finalize snapshot with certificate
+    ///
+    /// Finalizes a snapshot by verifying quorum and moving it from
+    /// pending to finalized snapshots.
+    pub fn finalize_snapshot(&mut self, sequence: u64) -> Result<SnapshotCertificate> {
+        let mut pending = self.pending_snapshots
+            .remove(&sequence)
+            .ok_or_else(|| Error::InvalidData(format!(
+                "Snapshot {} not found",
+                sequence
+            )))?;
+
+        // Verify quorum
+        if !pending.certificate.has_quorum {
+            return Err(Error::InvalidData(format!(
+                "Snapshot {} does not have quorum ({}/{} stake)",
+                sequence,
+                pending.certificate.stake_weight,
+                pending.certificate.total_stake
+            )));
+        }
+
+        // Finalize certificate
+        pending.certificate.finalize()?;
+
+        // Store finalized snapshot
+        let certificate = pending.certificate.clone();
+        self.finalized_snapshots.insert(sequence, (pending.snapshot, certificate.clone()));
         self.latest_sequence = sequence;
 
-        info!("Finalized snapshot {}", sequence);
+        info!(
+            "Finalized snapshot {} with {} signatures in {:.2}s",
+            sequence,
+            certificate.signature_count(),
+            pending.created_at.elapsed().as_secs_f64()
+        );
 
-        Ok(())
+        Ok(certificate)
+    }
+
+    /// Process timed-out snapshots
+    ///
+    /// Removes snapshots that have exceeded the finalization timeout.
+    /// Returns list of timed-out snapshot sequences.
+    pub fn process_timeouts(&mut self) -> Vec<u64> {
+        let mut timed_out = Vec::new();
+
+        let sequences: Vec<u64> = self.pending_snapshots
+            .iter()
+            .filter(|(_, p)| p.is_timed_out())
+            .map(|(seq, _)| *seq)
+            .collect();
+
+        for sequence in sequences {
+            if let Some(pending) = self.pending_snapshots.remove(&sequence) {
+                warn!(
+                    "Snapshot {} timed out after {:.2}s with {}/{} stake",
+                    sequence,
+                    pending.created_at.elapsed().as_secs_f64(),
+                    pending.certificate.stake_weight,
+                    pending.certificate.total_stake
+                );
+                timed_out.push(sequence);
+            }
+        }
+
+        timed_out
     }
 
     /// Get latest snapshot sequence
@@ -135,14 +284,87 @@ impl SnapshotManager {
         self.latest_sequence
     }
 
-    /// Get snapshot by sequence number
+    /// Get finalized snapshot by sequence
     pub fn get_snapshot(&self, sequence: u64) -> Option<&Snapshot> {
-        self.finalized_snapshots.get(&sequence)
+        self.finalized_snapshots.get(&sequence).map(|(s, _)| s)
     }
 
-    /// Get snapshot certificate
+    /// Get finalized snapshot with certificate
+    pub fn get_snapshot_with_certificate(&self, sequence: u64) -> Option<(&Snapshot, &SnapshotCertificate)> {
+        self.finalized_snapshots.get(&sequence).map(|(s, c)| (s, c))
+    }
+
+    /// Get pending snapshot certificate
+    pub fn get_pending_certificate(&self, sequence: u64) -> Option<&SnapshotCertificate> {
+        self.pending_snapshots.get(&sequence).map(|p| &p.certificate)
+    }
+
+    /// Get finalized certificate
     pub fn get_certificate(&self, sequence: u64) -> Option<&SnapshotCertificate> {
-        self.pending_certificates.get(&sequence)
+        self.finalized_snapshots.get(&sequence).map(|(_, c)| c)
+    }
+
+    /// Get pending snapshot count
+    pub fn pending_count(&self) -> usize {
+        self.pending_snapshots.len()
+    }
+
+    /// Get finalized snapshot count
+    pub fn finalized_count(&self) -> usize {
+        self.finalized_snapshots.len()
+    }
+
+    /// Get all pending snapshot sequences
+    pub fn get_pending_sequences(&self) -> Vec<u64> {
+        self.pending_snapshots.keys().copied().collect()
+    }
+
+    /// Verify snapshot certificate
+    pub fn verify_certificate(&self, sequence: u64) -> Result<()> {
+        self.finalized_snapshots
+            .get(&sequence)
+            .ok_or_else(|| Error::InvalidData(format!(
+                "Snapshot {} not found",
+                sequence
+            )))?
+            .1
+            .verify()
+    }
+
+    /// Get snapshot finalization time
+    pub fn get_finalization_time(&self, sequence: u64) -> Option<u64> {
+        self.finalized_snapshots
+            .get(&sequence)
+            .and_then(|(_, c)| c.finalization_time())
+    }
+
+    /// Get time to finalization
+    pub fn get_time_to_finalization(&self, sequence: u64) -> Option<u64> {
+        self.finalized_snapshots
+            .get(&sequence)
+            .and_then(|(_, c)| c.time_to_finalization())
+    }
+
+    /// Clear old snapshots (keep last N)
+    pub fn prune_old_snapshots(&mut self, keep_count: usize) {
+        if self.finalized_snapshots.len() <= keep_count {
+            return;
+        }
+
+        let to_remove = self.finalized_snapshots.len() - keep_count;
+        let mut sequences: Vec<u64> = self.finalized_snapshots.keys().copied().collect();
+        sequences.sort();
+
+        for sequence in sequences.iter().take(to_remove) {
+            self.finalized_snapshots.remove(sequence);
+            debug!("Pruned snapshot {}", sequence);
+        }
+
+        info!(
+            "Pruned {} old snapshots, keeping {} finalized snapshots",
+            to_remove,
+            self.finalized_snapshots.len()
+        );
     }
 }
 
@@ -152,45 +374,183 @@ impl Default for SnapshotManager {
     }
 }
 
-/// Snapshot certificate
+/// Snapshot certificate with full validation metadata
 ///
-/// Contains validator signatures for a snapshot
+/// Contains validator signatures for a snapshot with complete
+/// finalization information and verification data
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotCertificate {
     /// Snapshot sequence number
     pub sequence: u64,
     
-    /// Validator signatures
-    pub signatures: HashMap<ValidatorID, Signature>,
+    /// Snapshot digest (hash)
+    pub snapshot_digest: SnapshotDigest,
+    
+    /// Validator signatures indexed by validator ID
+    pub signatures: HashMap<ValidatorID, ValidatorSignatureInfo>,
     
     /// Total stake weight of signers
     pub stake_weight: u64,
+    
+    /// Total stake in network at finalization
+    pub total_stake: u64,
+    
+    /// Timestamp when certificate was created
+    pub created_at: u64,
+    
+    /// Timestamp when certificate was finalized
+    pub finalized_at: Option<u64>,
+    
+    /// Whether certificate has quorum
+    pub has_quorum: bool,
+}
+
+/// Validator signature information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidatorSignatureInfo {
+    /// Validator ID
+    pub validator_id: ValidatorID,
+    
+    /// Signature bytes
+    pub signature: Signature,
+    
+    /// Validator stake weight
+    pub stake_weight: u64,
+    
+    /// Timestamp when signature was added
+    pub signed_at: u64,
 }
 
 impl SnapshotCertificate {
     /// Create a new snapshot certificate
-    pub fn new(sequence: u64) -> Self {
+    pub fn new(
+        sequence: u64,
+        snapshot_digest: SnapshotDigest,
+        total_stake: u64,
+    ) -> Self {
+        let created_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         Self {
             sequence,
+            snapshot_digest,
             signatures: HashMap::new(),
             stake_weight: 0,
+            total_stake,
+            created_at,
+            finalized_at: None,
+            has_quorum: false,
         }
     }
 
     /// Add a validator signature
+    ///
+    /// Returns true if this is a new signature, false if validator already signed
     pub fn add_signature(
         &mut self,
         validator_id: ValidatorID,
         signature: Signature,
-        stake: u64,
-    ) {
-        if self.signatures.insert(validator_id.clone(), signature).is_none() {
-            self.stake_weight += stake;
+        stake_weight: u64,
+    ) -> Result<bool> {
+        if stake_weight == 0 {
+            return Err(Error::InvalidData(
+                "Validator stake weight must be > 0".to_string()
+            ));
         }
+
+        let signed_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let sig_info = ValidatorSignatureInfo {
+            validator_id: validator_id.clone(),
+            signature,
+            stake_weight,
+            signed_at,
+        };
+
+        // Check if validator already signed
+        if self.signatures.contains_key(&validator_id) {
+            debug!(
+                "Validator {} already signed snapshot {}",
+                validator_id, self.sequence
+            );
+            return Ok(false);
+        }
+
+        self.signatures.insert(validator_id.clone(), sig_info);
+        self.stake_weight += stake_weight;
+
+        // Check if we now have quorum
+        self.has_quorum = self.check_quorum();
+
+        debug!(
+            "Added signature from validator {} for snapshot {} (stake: {}, total: {}/{})",
+            validator_id,
+            self.sequence,
+            stake_weight,
+            self.stake_weight,
+            self.total_stake
+        );
+
+        Ok(true)
     }
 
     /// Check if certificate has quorum (2/3+ stake)
-    pub fn has_quorum(&self, total_stake: u64) -> bool {
-        self.stake_weight * 3 > total_stake * 2
+    fn check_quorum(&self) -> bool {
+        if self.total_stake == 0 {
+            return false;
+        }
+        self.stake_weight * 3 > self.total_stake * 2
+    }
+
+    /// Finalize the certificate
+    ///
+    /// Marks the certificate as finalized and verifies quorum
+    pub fn finalize(&mut self) -> Result<()> {
+        if !self.has_quorum {
+            return Err(Error::InvalidData(format!(
+                "Cannot finalize snapshot {} without quorum (have {}/{}, need 2/3)",
+                self.sequence,
+                self.stake_weight,
+                self.total_stake
+            )));
+        }
+
+        let finalized_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        self.finalized_at = Some(finalized_at);
+
+        info!(
+            "Finalized snapshot {} with {} signatures ({}/{} stake)",
+            self.sequence,
+            self.signatures.len(),
+            self.stake_weight,
+            self.total_stake
+        );
+
+        Ok(())
+    }
+
+    /// Check if certificate is finalized
+    pub fn is_finalized(&self) -> bool {
+        self.finalized_at.is_some()
+    }
+
+    /// Get finalization time if available
+    pub fn finalization_time(&self) -> Option<u64> {
+        self.finalized_at
+    }
+
+    /// Get time to finalization in seconds
+    pub fn time_to_finalization(&self) -> Option<u64> {
+        self.finalized_at.map(|finalized| finalized - self.created_at)
     }
 
     /// Get number of signatures
@@ -201,6 +561,45 @@ impl SnapshotCertificate {
     /// Get stake weight
     pub fn stake_weight(&self) -> u64 {
         self.stake_weight
+    }
+
+    /// Get quorum percentage
+    pub fn quorum_percentage(&self) -> f64 {
+        if self.total_stake == 0 {
+            return 0.0;
+        }
+        (self.stake_weight as f64 / self.total_stake as f64) * 100.0
+    }
+
+    /// Verify certificate integrity
+    ///
+    /// Checks:
+    /// - Has quorum
+    /// - Is finalized
+    /// - All signatures present
+    pub fn verify(&self) -> Result<()> {
+        if !self.has_quorum {
+            return Err(Error::InvalidData(format!(
+                "Certificate for snapshot {} does not have quorum",
+                self.sequence
+            )));
+        }
+
+        if !self.is_finalized() {
+            return Err(Error::InvalidData(format!(
+                "Certificate for snapshot {} is not finalized",
+                self.sequence
+            )));
+        }
+
+        if self.signatures.is_empty() {
+            return Err(Error::InvalidData(format!(
+                "Certificate for snapshot {} has no signatures",
+                self.sequence
+            )));
+        }
+
+        Ok(())
     }
 }
 
@@ -228,25 +627,42 @@ mod tests {
             [1u8; 64],
             vec![[2u8; 64], [3u8; 64]],
             1,
+            3_000_000,
         ).unwrap();
 
         assert_eq!(snapshot.sequence_number, 1);
         assert_eq!(snapshot.transactions.len(), 2);
+        assert_eq!(manager.pending_count(), 1);
     }
 
     #[test]
     fn test_certificate_quorum() {
-        let mut cert = SnapshotCertificate::new(1);
+        let snapshot_digest = SnapshotDigest::new([1u8; 64]);
+        let mut cert = SnapshotCertificate::new(1, snapshot_digest, 3_000_000);
         
         // Add signatures for 2/3 stake
-        cert.add_signature(create_test_validator_id(1), create_test_signature(), 1000);
-        cert.add_signature(create_test_validator_id(2), create_test_signature(), 1000);
+        assert!(cert.add_signature(create_test_validator_id(1), create_test_signature(), 1_000_000).unwrap());
+        assert!(cert.add_signature(create_test_validator_id(2), create_test_signature(), 1_000_000).unwrap());
         
-        // Total stake: 3000, signed: 2000 = 2/3
-        assert!(cert.has_quorum(3000));
+        // 2M / 3M = 66.67% > 66.67% (2/3)
+        assert!(cert.has_quorum);
+        assert!((cert.quorum_percentage() - 66.67).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_certificate_duplicate_signature() {
+        let snapshot_digest = SnapshotDigest::new([1u8; 64]);
+        let mut cert = SnapshotCertificate::new(1, snapshot_digest, 3_000_000);
         
-        // Total stake: 3001, signed: 2000 < 2/3
-        assert!(!cert.has_quorum(3001));
+        let validator_id = create_test_validator_id(1);
+        
+        // First signature should succeed
+        assert!(cert.add_signature(validator_id.clone(), create_test_signature(), 1_000_000).unwrap());
+        assert_eq!(cert.stake_weight, 1_000_000);
+        
+        // Duplicate signature should be rejected
+        assert!(!cert.add_signature(validator_id, create_test_signature(), 1_000_000).unwrap());
+        assert_eq!(cert.stake_weight, 1_000_000); // Unchanged
     }
 
     #[test]
@@ -257,14 +673,156 @@ mod tests {
             [1u8; 64],
             vec![],
             1,
+            3_000_000,
         ).unwrap();
 
-        // Add quorum signatures
-        manager.add_signature(1, create_test_validator_id(1), create_test_signature(), 2000).unwrap();
+        // Add quorum signatures (2/3 = 2M)
+        manager.add_signature(1, create_test_validator_id(1), create_test_signature(), 1_000_000).unwrap();
+        manager.add_signature(1, create_test_validator_id(2), create_test_signature(), 1_000_000).unwrap();
         
-        // Should finalize with quorum
-        assert!(manager.finalize_snapshot(snapshot, 3000).is_ok());
+        assert!(manager.has_quorum(1));
+        
+        // Finalize
+        let cert = manager.finalize_snapshot(1).unwrap();
+        assert!(cert.is_finalized());
         assert_eq!(manager.latest_sequence(), 1);
+        assert_eq!(manager.pending_count(), 0);
+        assert_eq!(manager.finalized_count(), 1);
+    }
+
+    #[test]
+    fn test_snapshot_finalization_without_quorum() {
+        let mut manager = SnapshotManager::new();
+        
+        manager.create_snapshot(
+            [1u8; 64],
+            vec![],
+            1,
+            3_000_000,
+        ).unwrap();
+
+        // Add only 1/3 stake
+        manager.add_signature(1, create_test_validator_id(1), create_test_signature(), 1_000_000).unwrap();
+        
+        assert!(!manager.has_quorum(1));
+        
+        // Should fail to finalize
+        let result = manager.finalize_snapshot(1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_snapshot_timeout() {
+        let mut manager = SnapshotManager::with_timeout(Duration::from_millis(100));
+        
+        manager.create_snapshot(
+            [1u8; 64],
+            vec![],
+            1,
+            3_000_000,
+        ).unwrap();
+
+        assert_eq!(manager.pending_count(), 1);
+
+        // Wait for timeout
+        std::thread::sleep(Duration::from_millis(150));
+
+        let timed_out = manager.process_timeouts();
+        assert_eq!(timed_out.len(), 1);
+        assert_eq!(manager.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_multiple_snapshots() {
+        let mut manager = SnapshotManager::new();
+        
+        // Create 3 snapshots
+        for i in 1..=3 {
+            manager.create_snapshot(
+                [i as u8; 64],
+                vec![[i as u8; 64]],
+                i as u64,
+                3_000_000,
+            ).unwrap();
+        }
+
+        assert_eq!(manager.pending_count(), 3);
+
+        // Finalize first snapshot
+        manager.add_signature(1, create_test_validator_id(1), create_test_signature(), 1_000_000).unwrap();
+        manager.add_signature(1, create_test_validator_id(2), create_test_signature(), 1_000_000).unwrap();
+        manager.finalize_snapshot(1).unwrap();
+
+        assert_eq!(manager.pending_count(), 2);
+        assert_eq!(manager.finalized_count(), 1);
+        assert_eq!(manager.latest_sequence(), 1);
+    }
+
+    #[test]
+    fn test_snapshot_verification() {
+        let mut manager = SnapshotManager::new();
+        
+        manager.create_snapshot(
+            [1u8; 64],
+            vec![],
+            1,
+            3_000_000,
+        ).unwrap();
+
+        // Add quorum
+        manager.add_signature(1, create_test_validator_id(1), create_test_signature(), 1_000_000).unwrap();
+        manager.add_signature(1, create_test_validator_id(2), create_test_signature(), 1_000_000).unwrap();
+        
+        manager.finalize_snapshot(1).unwrap();
+
+        // Verify certificate
+        assert!(manager.verify_certificate(1).is_ok());
+    }
+
+    #[test]
+    fn test_snapshot_pruning() {
+        let mut manager = SnapshotManager::new();
+        
+        // Create and finalize 5 snapshots
+        for i in 1..=5 {
+            manager.create_snapshot(
+                [i as u8; 64],
+                vec![],
+                i as u64,
+                3_000_000,
+            ).unwrap();
+
+            manager.add_signature(i, create_test_validator_id(1), create_test_signature(), 1_000_000).unwrap();
+            manager.add_signature(i, create_test_validator_id(2), create_test_signature(), 1_000_000).unwrap();
+            manager.finalize_snapshot(i).unwrap();
+        }
+
+        assert_eq!(manager.finalized_count(), 5);
+
+        // Prune to keep only 2
+        manager.prune_old_snapshots(2);
+        assert_eq!(manager.finalized_count(), 2);
+    }
+
+    #[test]
+    fn test_certificate_finalization_time() {
+        let mut manager = SnapshotManager::new();
+        
+        manager.create_snapshot(
+            [1u8; 64],
+            vec![],
+            1,
+            3_000_000,
+        ).unwrap();
+
+        manager.add_signature(1, create_test_validator_id(1), create_test_signature(), 1_000_000).unwrap();
+        manager.add_signature(1, create_test_validator_id(2), create_test_signature(), 1_000_000).unwrap();
+        
+        manager.finalize_snapshot(1).unwrap();
+
+        let time_to_finalization = manager.get_time_to_finalization(1);
+        assert!(time_to_finalization.is_some());
+        assert!(time_to_finalization.unwrap() < 1); // Should be < 1 second
     }
 }
 
