@@ -13,85 +13,84 @@
 #![forbid(unsafe_code)]
 #![allow(missing_docs)] // Internal implementation details
 
-pub mod cascade;
-pub mod mercury;
-pub mod validator;
-pub mod validator_keys;
-pub mod validator_tiers;
-pub mod staking;
-pub mod delegation;
-pub mod commission;
-pub mod validator_ops;
-pub mod snapshot;
-pub mod flow_graph;
-pub mod rewards;
-pub mod upgrade;
 pub mod activation;
-pub mod compatibility;
-pub mod optimizations; // OPTIMIZATION: Consensus optimizations (Task 35.4)
-pub mod slashing;
-pub mod downtime_tracker;
-pub mod validator_activation;
-pub mod key_rotation;
+pub mod block_creator;
+pub mod cascade;
+pub mod commission;
 pub mod commission_manager;
+pub mod compatibility;
+pub mod delegation;
+pub mod downtime_tracker;
+pub mod flow_graph;
+pub mod key_rotation;
+pub mod mercury;
+pub mod optimizations; // OPTIMIZATION: Consensus optimizations (Task 35.4)
+pub mod persistence;
+pub mod rewards;
+pub mod slashing;
+pub mod snapshot;
+pub mod staking;
+pub mod upgrade;
+pub mod validator;
+pub mod validator_activation;
+pub mod validator_keys;
 pub mod validator_monitoring;
+pub mod validator_ops;
+pub mod validator_tiers;
 
+pub use activation::{ActivationCoordinator, ActivationStats};
+pub use block_creator::BlockCreator;
 pub use cascade::CascadeMempool;
-pub use mercury::MercuryProtocol;
-pub use validator::{ValidatorSet, ValidatorInfo, ValidatorSetChangeEvent};
-pub use validator_keys::{
-    ValidatorKeyManager, ValidatorKeySet, ValidatorPrivateKey,
-    EncryptedValidatorKeys, KeyRotationRecord,
-};
-pub use validator_tiers::{
-    ValidatorTier, ValidatorTierInfo, ValidatorTierManager,
-    TierChangeEvent,
-};
-pub use staking::{
-    StakingManager, ValidatorStake, StakeDeposit, UnstakingRequest,
-    MIN_STAKE_AMOUNT, UNBONDING_PERIOD_SECS,
-};
-pub use delegation::{
-    DelegationManager, Delegation, UndelegationRequest, ValidatorDelegationInfo,
-    MIN_DELEGATION_AMOUNT, MAX_DELEGATED_STAKE_PER_VALIDATOR,
-};
 pub use commission::{
     CommissionManager, CommissionRate, CommissionRateChange, ValidatorCommissionInfo,
-    MIN_COMMISSION_RATE, MAX_COMMISSION_RATE, COMMISSION_CHANGE_NOTICE_PERIOD,
+    COMMISSION_CHANGE_NOTICE_PERIOD, MAX_COMMISSION_RATE, MIN_COMMISSION_RATE,
 };
-pub use validator_ops::{ValidatorOperations, DOWNTIME_THRESHOLD};
-pub use snapshot::{SnapshotManager, SnapshotCertificate, ValidatorSignatureInfo};
-pub use flow_graph::FlowGraph;
-pub use rewards::{
-    FuelFeeCollector, RewardDistributor, CycleRewardsManager,
-    ValidatorReward, TransactionFee,
-};
-pub use upgrade::{UpgradeManager, UpgradeStats};
-pub use activation::{ActivationCoordinator, ActivationStats};
+pub use commission_manager::{CommissionChangeRequest, CommissionConfig};
 pub use compatibility::{CompatibilityChecker, CompatibilityStats, FeatureExtractor};
-pub use optimizations::{
-    BatchPipeline, FlowGraphCache, SnapshotOptimizer,
-    PipelineStats, CacheStats, SnapshotStats,
-}; // OPTIMIZATION exports
-pub use slashing::{
-    SlashingManager, SlashingConfig, JailRecord, JailReason, SlashEvent,
+pub use delegation::{
+    Delegation, DelegationManager, UndelegationRequest, ValidatorDelegationInfo,
+    MAX_DELEGATED_STAKE_PER_VALIDATOR, MIN_DELEGATION_AMOUNT,
 };
 pub use downtime_tracker::{
-    DowntimeTracker, DowntimeConfig, ValidatorDowntimeRecord, DowntimeEvent, DowntimeEventType,
+    DowntimeConfig, DowntimeEvent, DowntimeEventType, DowntimeTracker, ValidatorDowntimeRecord,
 };
-pub use validator_activation::{
-    ValidatorActivationManager, ActivationConfig, ValidatorActivationRecord, ActivationRequest,
-    ValidatorStatus, ActivationEvent, ActivationEventType, ActivationRequestType, ActivationRequestStatus,
-};
+pub use flow_graph::FlowGraph;
 pub use key_rotation::{
-    KeyRotationManager, KeyRotationConfig, KeyRecord, KeyStatus, KeyRotationRequest,
-    KeyRotationRequestStatus, KeyRotationEvent, KeyRotationEventType,
+    KeyRecord, KeyRotationConfig, KeyRotationEvent, KeyRotationEventType, KeyRotationManager,
+    KeyRotationRequest, KeyRotationRequestStatus, KeyStatus,
 };
-pub use commission_manager::{
-    CommissionManager, CommissionConfig, CommissionRate, CommissionChangeRequest,
-    ValidatorCommissionInfo,
+pub use mercury::MercuryProtocol;
+pub use optimizations::{
+    BatchPipeline, CacheStats, FlowGraphCache, PipelineStats, SnapshotOptimizer, SnapshotStats,
+}; // OPTIMIZATION exports
+pub use persistence::{
+    OperationStatus, OperationType, PersistenceLogEntry, PersistenceLogger,
+};
+pub use rewards::{
+    CycleRewardsManager, FuelFeeCollector, RewardDistributor, TransactionFee, ValidatorReward,
+};
+pub use slashing::{JailReason, JailRecord, SlashEvent, SlashingConfig, SlashingManager};
+pub use snapshot::{SnapshotCertificate, SnapshotManager, ValidatorSignatureInfo};
+pub use staking::{
+    StakeDeposit, StakingManager, UnstakingRequest, ValidatorStake, MIN_STAKE_AMOUNT,
+    UNBONDING_PERIOD_SECS,
+};
+pub use upgrade::{UpgradeManager, UpgradeStats};
+pub use validator::{ValidatorInfo, ValidatorSet, ValidatorSetChangeEvent};
+pub use validator_activation::{
+    ActivationConfig, ActivationEvent, ActivationEventType, ActivationRequest,
+    ActivationRequestStatus, ActivationRequestType, ValidatorActivationManager,
+    ValidatorActivationRecord, ValidatorStatus,
+};
+pub use validator_keys::{
+    EncryptedValidatorKeys, KeyRotationRecord, ValidatorKeyManager, ValidatorKeySet,
+    ValidatorPrivateKey,
 };
 pub use validator_monitoring::{
-    ValidatorMonitor, ValidatorMetrics, PerformanceAlert, AlertType, AlertSeverity,
-    MonitoringConfig, HealthStatus, Status,
+    AlertSeverity, AlertType, HealthStatus, MonitoringConfig, PerformanceAlert, Status,
+    ValidatorMetrics, ValidatorMonitor,
+};
+pub use validator_ops::{ValidatorOperations, DOWNTIME_THRESHOLD};
+pub use validator_tiers::{
+    TierChangeEvent, ValidatorTier, ValidatorTierInfo, ValidatorTierManager,
 };

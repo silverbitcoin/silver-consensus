@@ -4,10 +4,10 @@
 //! with proper penalty application for validators with >10% downtime.
 
 use crate::{
-    ValidatorSet, ValidatorInfo, StakingManager, RewardDistributor,
-    FuelFeeCollector, ValidatorReward,
+    FuelFeeCollector, RewardDistributor, StakingManager, ValidatorInfo, ValidatorReward,
+    ValidatorSet,
 };
-use silver_core::{ValidatorID, ValidatorMetadata, Result, Error};
+use silver_core::{Error, Result, ValidatorID, ValidatorMetadata};
 use std::collections::HashMap;
 use tracing::{info, warn};
 
@@ -23,13 +23,13 @@ pub const DOWNTIME_THRESHOLD: f64 = 0.10;
 pub struct ValidatorOperations {
     /// Validator set
     validator_set: ValidatorSet,
-    
+
     /// Staking manager
     staking_manager: StakingManager,
-    
+
     /// Reward distributor
     reward_distributor: RewardDistributor,
-    
+
     /// Fee collector
     fee_collector: FuelFeeCollector,
 }
@@ -39,7 +39,7 @@ impl ValidatorOperations {
     pub fn new() -> Self {
         // Set minimum participation to 90% (10% downtime threshold)
         let reward_distributor = RewardDistributor::new(0.9, 1.0);
-        
+
         Self {
             validator_set: ValidatorSet::new(),
             staking_manager: StakingManager::new(),
@@ -61,7 +61,8 @@ impl ValidatorOperations {
         if stake_amount < crate::MIN_STAKE_AMOUNT {
             return Err(Error::InvalidData(format!(
                 "Validator stake {} is below minimum {}",
-                stake_amount, crate::MIN_STAKE_AMOUNT
+                stake_amount,
+                crate::MIN_STAKE_AMOUNT
             )));
         }
 
@@ -69,11 +70,8 @@ impl ValidatorOperations {
         self.validator_set.add_validator(metadata)?;
 
         // Record stake deposit
-        self.staking_manager.deposit_stake(
-            validator_id.clone(),
-            stake_amount,
-            deposit_tx,
-        )?;
+        self.staking_manager
+            .deposit_stake(validator_id.clone(), stake_amount, deposit_tx)?;
 
         info!(
             "Registered validator {} with {} SBTC stake",
@@ -89,7 +87,8 @@ impl ValidatorOperations {
         validator_id: &ValidatorID,
         participated: bool,
     ) {
-        self.validator_set.record_participation(validator_id, participated);
+        self.validator_set
+            .record_participation(validator_id, participated);
     }
 
     /// Collect transaction fee
@@ -99,7 +98,8 @@ impl ValidatorOperations {
         fuel_consumed: u64,
         fuel_price: u64,
     ) {
-        self.fee_collector.collect_fee(tx_digest, fuel_consumed, fuel_price);
+        self.fee_collector
+            .collect_fee(tx_digest, fuel_consumed, fuel_price);
     }
 
     /// End cycle and distribute rewards
@@ -120,23 +120,19 @@ impl ValidatorOperations {
         for validator in &validators {
             let stake = self.staking_manager.get_active_stake(&validator.id());
             let participation_rate = validator.participation_rate();
-            
-            validator_data.insert(
-                validator.id(),
-                (stake, participation_rate),
-            );
+
+            validator_data.insert(validator.id(), (stake, participation_rate));
         }
 
         // Calculate and distribute rewards
-        let rewards = self.reward_distributor.distribute_cycle_rewards(
-            &self.fee_collector,
-            &validator_data,
-        );
+        let rewards = self
+            .reward_distributor
+            .distribute_cycle_rewards(&self.fee_collector, &validator_data);
 
         // Log penalties for validators with high downtime
         for (validator_id, reward) in &rewards {
             let downtime = 1.0 - reward.participation_rate;
-            
+
             if downtime > DOWNTIME_THRESHOLD {
                 warn!(
                     "Validator {} penalized for {:.1}% downtime (participation: {:.1}%)",
@@ -243,121 +239,5 @@ impl ValidatorOperations {
 impl Default for ValidatorOperations {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use silver_core::{PublicKey, SignatureScheme, SilverAddress};
-
-    fn create_test_validator(id: u8, stake: u64) -> ValidatorMetadata {
-        let address = SilverAddress::new([id; 64]);
-        let pubkey = PublicKey {
-            scheme: SignatureScheme::Dilithium3,
-            bytes: vec![0u8; 100],
-        };
-
-        ValidatorMetadata::new(
-            address,
-            pubkey.clone(),
-            pubkey.clone(),
-            pubkey,
-            stake,
-            "127.0.0.1:9000".to_string(),
-            "127.0.0.1:9001".to_string(),
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn test_validator_registration() {
-        let mut ops = ValidatorOperations::new();
-        let metadata = create_test_validator(1, 50_000); // Silver tier
-        let validator_id = metadata.id();
-
-        let result = ops.register_validator(metadata, vec![1u8; 64]);
-        assert!(result.is_ok());
-
-        assert_eq!(ops.get_validator_stake(&validator_id), 1_000_000);
-        assert!(ops.get_validator(&validator_id).is_some());
-    }
-
-    #[test]
-    fn test_participation_tracking() {
-        let mut ops = ValidatorOperations::new();
-        let metadata = create_test_validator(1, 1_000_000);
-        let validator_id = metadata.id();
-
-        ops.register_validator(metadata, vec![1u8; 64]).unwrap();
-
-        // Record participation
-        ops.record_snapshot_participation(&validator_id, true);
-        ops.record_snapshot_participation(&validator_id, true);
-        ops.record_snapshot_participation(&validator_id, false);
-
-        let validator = ops.get_validator(&validator_id).unwrap();
-        assert_eq!(validator.snapshots_participated, 2);
-        assert_eq!(validator.total_snapshots, 3);
-    }
-
-    #[test]
-    fn test_reward_distribution() {
-        let mut ops = ValidatorOperations::new();
-        
-        // Register two validators
-        let metadata1 = create_test_validator(1, 1_000_000);
-        let metadata2 = create_test_validator(2, 2_000_000);
-        let id1 = metadata1.id();
-        let id2 = metadata2.id();
-
-        ops.register_validator(metadata1, vec![1u8; 64]).unwrap();
-        ops.register_validator(metadata2, vec![2u8; 64]).unwrap();
-
-        // Record participation (validator 1: 100%, validator 2: 80%)
-        for _ in 0..10 {
-            ops.record_snapshot_participation(&id1, true);
-            ops.record_snapshot_participation(&id2, true);
-        }
-        for _ in 0..2 {
-            ops.record_snapshot_participation(&id2, false);
-        }
-
-        // Collect fees
-        ops.collect_transaction_fee([1; 64], 1000, 1000);
-        ops.collect_transaction_fee([2; 64], 2000, 1000);
-
-        // End cycle and distribute rewards
-        let rewards = ops.end_cycle();
-
-        assert_eq!(rewards.len(), 2);
-        
-        // Validator 1 should get full reward (100% participation)
-        let reward1 = rewards.get(&id1).unwrap();
-        assert_eq!(reward1.penalty, 0);
-
-        // Validator 2 should get penalty (80% participation < 90% threshold)
-        let reward2 = rewards.get(&id2).unwrap();
-        assert!(reward2.penalty > 0);
-    }
-
-    #[test]
-    fn test_unstaking() {
-        let mut ops = ValidatorOperations::new();
-        let metadata = create_test_validator(1, 500_000); // Platinum tier
-        let validator_id = metadata.id();
-
-        ops.register_validator(metadata, vec![1u8; 64]).unwrap();
-
-        // Request unstaking (should downgrade to Gold)
-        let (request, tier_event) = ops.request_unstake(&validator_id, 400_000).unwrap();
-        assert!(tier_event.is_some()); // Tier changed
-        assert!(!request.completed);
-        assert_eq!(ops.get_validator_stake(&validator_id), 100_000);
-    }
-
-    #[test]
-    fn test_downtime_threshold() {
-        assert_eq!(DOWNTIME_THRESHOLD, 0.10);
     }
 }

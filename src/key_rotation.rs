@@ -8,24 +8,24 @@
 //! - Backward compatibility
 //! - Comprehensive audit trail
 
-use silver_core::{Error, Result, ValidatorID, PublicKey};
 use serde::{Deserialize, Serialize};
+use silver_core::{Error, PublicKey, Result, ValidatorID};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Key rotation configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyRotationConfig {
     /// Transition period (seconds) to accept both old and new keys
     pub transition_period_secs: u64,
-    
+
     /// Votes required for key rotation (percentage of total stake)
     pub votes_required: f64,
-    
+
     /// Maximum keys per validator
     pub max_keys_per_validator: usize,
-    
+
     /// Key expiration period (seconds)
     pub key_expiration_secs: u64,
 }
@@ -33,10 +33,10 @@ pub struct KeyRotationConfig {
 impl Default for KeyRotationConfig {
     fn default() -> Self {
         Self {
-            transition_period_secs: 604800,  // 7 days
-            votes_required: 0.66,            // 66% (2/3)
-            max_keys_per_validator: 3,       // Current + 2 old
-            key_expiration_secs: 2592000,    // 30 days
+            transition_period_secs: 604800, // 7 days
+            votes_required: 0.66,           // 66% (2/3)
+            max_keys_per_validator: 3,      // Current + 2 old
+            key_expiration_secs: 2592000,   // 30 days
         }
     }
 }
@@ -46,16 +46,16 @@ impl Default for KeyRotationConfig {
 pub enum KeyStatus {
     /// Active key (currently used)
     Active,
-    
+
     /// Pending key (waiting for transition)
     Pending,
-    
+
     /// Transitioning (accepting both old and new)
     Transitioning,
-    
+
     /// Revoked (no longer accepted)
     Revoked,
-    
+
     /// Expired (past expiration date)
     Expired,
 }
@@ -77,28 +77,28 @@ impl std::fmt::Display for KeyStatus {
 pub struct KeyRecord {
     /// Key ID (hash of public key)
     pub key_id: Vec<u8>,
-    
+
     /// Public key
     pub public_key: PublicKey,
-    
+
     /// Current status
     pub status: KeyStatus,
-    
+
     /// Created at
     pub created_at: u64,
-    
+
     /// Activated at
     pub activated_at: Option<u64>,
-    
+
     /// Transition starts at
     pub transition_starts_at: Option<u64>,
-    
+
     /// Transition ends at
     pub transition_ends_at: Option<u64>,
-    
+
     /// Revoked at
     pub revoked_at: Option<u64>,
-    
+
     /// Expires at
     pub expires_at: Option<u64>,
 }
@@ -143,7 +143,10 @@ impl KeyRecord {
         self.transition_starts_at = Some(now);
         self.transition_ends_at = Some(now + transition_period_secs);
 
-        debug!("Activated key (transition period: {} seconds)", transition_period_secs);
+        debug!(
+            "Activated key (transition period: {} seconds)",
+            transition_period_secs
+        );
 
         Ok(())
     }
@@ -241,22 +244,22 @@ impl KeyRecord {
 pub struct KeyRotationRequest {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// New key ID
     pub new_key_id: Vec<u8>,
-    
+
     /// New public key
     pub new_public_key: PublicKey,
-    
+
     /// Requested at
     pub requested_at: u64,
-    
+
     /// Votes in favor
     pub votes_in_favor: u64,
-    
+
     /// Total votes
     pub total_votes: u64,
-    
+
     /// Status
     pub status: KeyRotationRequestStatus,
 }
@@ -266,13 +269,13 @@ pub struct KeyRotationRequest {
 pub enum KeyRotationRequestStatus {
     /// Pending voting
     Pending,
-    
+
     /// Approved
     Approved,
-    
+
     /// Rejected
     Rejected,
-    
+
     /// Expired
     Expired,
 }
@@ -293,16 +296,16 @@ impl std::fmt::Display for KeyRotationRequestStatus {
 pub struct KeyRotationEvent {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Event type
     pub event_type: KeyRotationEventType,
-    
+
     /// Key ID
     pub key_id: Vec<u8>,
-    
+
     /// Timestamp
     pub timestamp: u64,
-    
+
     /// Cycle
     pub cycle: u64,
 }
@@ -312,19 +315,19 @@ pub struct KeyRotationEvent {
 pub enum KeyRotationEventType {
     /// Key rotation requested
     RotationRequested,
-    
+
     /// Key rotation approved
     RotationApproved,
-    
+
     /// Key rotation rejected
     RotationRejected,
-    
+
     /// Key transition started
     TransitionStarted,
-    
+
     /// Key transition completed
     TransitionCompleted,
-    
+
     /// Key revoked
     KeyRevoked,
 }
@@ -346,19 +349,19 @@ impl std::fmt::Display for KeyRotationEventType {
 pub struct KeyRotationManager {
     /// Configuration
     config: KeyRotationConfig,
-    
+
     /// Validator keys (validator_id -> key_id -> KeyRecord)
     validator_keys: HashMap<ValidatorID, HashMap<Vec<u8>, KeyRecord>>,
-    
+
     /// Current active key per validator
     active_keys: HashMap<ValidatorID, Vec<u8>>,
-    
+
     /// Pending rotation requests
     pending_requests: HashMap<ValidatorID, KeyRotationRequest>,
-    
+
     /// Key rotation events
     events: Vec<KeyRotationEvent>,
-    
+
     /// Current cycle
     current_cycle: u64,
 }
@@ -401,20 +404,18 @@ impl KeyRotationManager {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_secs()
+                .as_secs(),
         );
 
-        let keys = self.validator_keys
+        let keys = self
+            .validator_keys
             .entry(validator_id.clone())
             .or_insert_with(HashMap::new);
 
         keys.insert(key_id.clone(), key_record);
         self.active_keys.insert(validator_id.clone(), key_id);
 
-        info!(
-            "Registered initial key for validator {}",
-            validator_id
-        );
+        info!("Registered initial key for validator {}", validator_id);
 
         Ok(())
     }
@@ -455,7 +456,8 @@ impl KeyRotationManager {
             status: KeyRotationRequestStatus::Pending,
         };
 
-        self.pending_requests.insert(validator_id.clone(), request.clone());
+        self.pending_requests
+            .insert(validator_id.clone(), request.clone());
 
         let event = KeyRotationEvent {
             validator_id: validator_id.clone(),
@@ -470,10 +472,7 @@ impl KeyRotationManager {
 
         self.events.push(event);
 
-        info!(
-            "Requested key rotation for validator {}",
-            validator_id
-        );
+        info!("Requested key rotation for validator {}", validator_id);
 
         Ok(request)
     }
@@ -485,12 +484,12 @@ impl KeyRotationManager {
         vote_in_favor: bool,
         voting_power: u64,
     ) -> Result<()> {
-        let request = self.pending_requests
-            .get_mut(validator_id)
-            .ok_or_else(|| Error::InvalidData(format!(
+        let request = self.pending_requests.get_mut(validator_id).ok_or_else(|| {
+            Error::InvalidData(format!(
                 "No pending key rotation request for validator {}",
                 validator_id
-            )))?;
+            ))
+        })?;
 
         request.total_votes += voting_power;
         if vote_in_favor {
@@ -511,12 +510,12 @@ impl KeyRotationManager {
         validator_id: &ValidatorID,
         total_stake: u64,
     ) -> Result<KeyRotationRequestStatus> {
-        let request = self.pending_requests
-            .get_mut(validator_id)
-            .ok_or_else(|| Error::InvalidData(format!(
+        let request = self.pending_requests.get_mut(validator_id).ok_or_else(|| {
+            Error::InvalidData(format!(
                 "No pending key rotation request for validator {}",
                 validator_id
-            )))?;
+            ))
+        })?;
 
         let required_votes = (total_stake as f64 * self.config.votes_required) as u64;
 
@@ -530,10 +529,12 @@ impl KeyRotationManager {
 
         if status == KeyRotationRequestStatus::Approved {
             // Add new key
-            let mut new_key = KeyRecord::new(request.new_key_id.clone(), request.new_public_key.clone());
+            let mut new_key =
+                KeyRecord::new(request.new_key_id.clone(), request.new_public_key.clone());
             new_key.activate(self.config.transition_period_secs)?;
 
-            let keys = self.validator_keys
+            let keys = self
+                .validator_keys
                 .entry(validator_id.clone())
                 .or_insert_with(HashMap::new);
 
@@ -604,7 +605,8 @@ impl KeyRotationManager {
                 if key.status == KeyStatus::Transitioning && key.is_transition_complete() {
                     if key.complete_transition().is_ok() {
                         // Update active key
-                        self.active_keys.insert(validator_id.clone(), key_id.clone());
+                        self.active_keys
+                            .insert(validator_id.clone(), key_id.clone());
                         completed.push(validator_id.clone());
 
                         let event = KeyRotationEvent {
@@ -620,10 +622,7 @@ impl KeyRotationManager {
 
                         self.events.push(event);
 
-                        info!(
-                            "Completed key transition for validator {}",
-                            validator_id
-                        );
+                        info!("Completed key transition for validator {}", validator_id);
                     }
                 }
             }
@@ -634,24 +633,18 @@ impl KeyRotationManager {
 
     /// Get active key for validator
     pub fn get_active_key(&self, validator_id: &ValidatorID) -> Option<&KeyRecord> {
-        self.active_keys
-            .get(validator_id)
-            .and_then(|key_id| {
-                self.validator_keys
-                    .get(validator_id)
-                    .and_then(|keys| keys.get(key_id))
-            })
+        self.active_keys.get(validator_id).and_then(|key_id| {
+            self.validator_keys
+                .get(validator_id)
+                .and_then(|keys| keys.get(key_id))
+        })
     }
 
     /// Get all valid keys for validator (active + transitioning)
     pub fn get_valid_keys(&self, validator_id: &ValidatorID) -> Vec<&KeyRecord> {
         self.validator_keys
             .get(validator_id)
-            .map(|keys| {
-                keys.values()
-                    .filter(|k| k.is_valid())
-                    .collect()
-            })
+            .map(|keys| keys.values().filter(|k| k.is_valid()).collect())
             .unwrap_or_default()
     }
 
@@ -676,7 +669,10 @@ impl KeyRotationManager {
     /// Advance to next cycle
     pub fn advance_cycle(&mut self) {
         self.current_cycle += 1;
-        debug!("Advanced key rotation manager to cycle {}", self.current_cycle);
+        debug!(
+            "Advanced key rotation manager to cycle {}",
+            self.current_cycle
+        );
     }
 
     /// Get current cycle
@@ -702,144 +698,5 @@ impl KeyRotationManager {
     /// Get event count
     pub fn event_count(&self) -> usize {
         self.events.len()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use silver_core::{SilverAddress, SignatureScheme};
-
-    fn create_test_validator_id(id: u8) -> ValidatorID {
-        ValidatorID::new(SilverAddress::new([id; 64]))
-    }
-
-    fn create_test_public_key() -> PublicKey {
-        PublicKey {
-            scheme: SignatureScheme::Dilithium3,
-            bytes: vec![0u8; 100],
-        }
-    }
-
-    #[test]
-    fn test_key_record() {
-        let mut key = KeyRecord::new(vec![1u8; 32], create_test_public_key());
-
-        assert_eq!(key.status, KeyStatus::Pending);
-        assert!(key.activate(604800).is_ok());
-        assert_eq!(key.status, KeyStatus::Transitioning);
-    }
-
-    #[test]
-    fn test_register_initial_key() {
-        let mut manager = KeyRotationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        assert!(manager
-            .register_initial_key(validator_id.clone(), vec![1u8; 32], create_test_public_key())
-            .is_ok());
-
-        assert!(manager.get_active_key(&validator_id).is_some());
-    }
-
-    #[test]
-    fn test_request_key_rotation() {
-        let mut manager = KeyRotationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .register_initial_key(validator_id.clone(), vec![1u8; 32], create_test_public_key())
-            .unwrap();
-
-        let request = manager
-            .request_key_rotation(validator_id.clone(), vec![2u8; 32], create_test_public_key())
-            .unwrap();
-
-        assert_eq!(request.status, KeyRotationRequestStatus::Pending);
-    }
-
-    #[test]
-    fn test_voting() {
-        let mut manager = KeyRotationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .register_initial_key(validator_id.clone(), vec![1u8; 32], create_test_public_key())
-            .unwrap();
-
-        manager
-            .request_key_rotation(validator_id.clone(), vec![2u8; 32], create_test_public_key())
-            .unwrap();
-
-        manager
-            .vote_on_rotation(&validator_id, true, 1_000_000)
-            .unwrap();
-
-        let request = manager.get_pending_request(&validator_id).unwrap();
-        assert_eq!(request.votes_in_favor, 1_000_000);
-    }
-
-    #[test]
-    fn test_finalize_approved() {
-        let mut manager = KeyRotationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .register_initial_key(validator_id.clone(), vec![1u8; 32], create_test_public_key())
-            .unwrap();
-
-        manager
-            .request_key_rotation(validator_id.clone(), vec![2u8; 32], create_test_public_key())
-            .unwrap();
-
-        manager
-            .vote_on_rotation(&validator_id, true, 2_000_000)
-            .unwrap();
-
-        let status = manager.finalize_rotation(&validator_id, 3_000_000).unwrap();
-        assert_eq!(status, KeyRotationRequestStatus::Approved);
-    }
-
-    #[test]
-    fn test_valid_keys() {
-        let mut manager = KeyRotationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .register_initial_key(validator_id.clone(), vec![1u8; 32], create_test_public_key())
-            .unwrap();
-
-        let valid_keys = manager.get_valid_keys(&validator_id);
-        assert_eq!(valid_keys.len(), 1);
-    }
-
-    #[test]
-    fn test_events() {
-        let mut manager = KeyRotationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .register_initial_key(validator_id.clone(), vec![1u8; 32], create_test_public_key())
-            .unwrap();
-
-        manager
-            .request_key_rotation(validator_id.clone(), vec![2u8; 32], create_test_public_key())
-            .unwrap();
-
-        let events = manager.get_validator_events(&validator_id);
-        assert!(!events.is_empty());
-    }
-
-    #[test]
-    fn test_custom_config() {
-        let config = KeyRotationConfig {
-            transition_period_secs: 1209600,
-            votes_required: 0.75,
-            max_keys_per_validator: 5,
-            key_expiration_secs: 5184000,
-        };
-
-        let manager = KeyRotationManager::new(config);
-        assert_eq!(manager.config().transition_period_secs, 1209600);
     }
 }

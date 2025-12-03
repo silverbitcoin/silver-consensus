@@ -6,8 +6,8 @@
 //! - Secure key zeroization
 //! - Key rotation support
 
-use silver_core::{Error, PublicKey, Result, Signature, SignatureScheme, SilverAddress};
 use serde::{Deserialize, Serialize};
+use silver_core::{Error, PublicKey, Result, Signature, SignatureScheme, SilverAddress};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::info;
@@ -66,10 +66,19 @@ impl ValidatorPrivateKey {
                     bytes: vec![0u8; 133],
                 })
             }
-            SignatureScheme::Hybrid => {
-                Err(Error::InvalidData(
-                    "Hybrid keys must be managed separately".to_string(),
-                ))
+            SignatureScheme::Hybrid => Err(Error::InvalidData(
+                "Hybrid keys must be managed separately".to_string(),
+            )),
+            SignatureScheme::Secp256k1 => {
+                if self.bytes.len() != 32 {
+                    return Err(Error::InvalidData(
+                        "Invalid Secp256k1 private key length: expected 32 bytes".to_string(),
+                    ));
+                }
+                Ok(PublicKey {
+                    scheme: SignatureScheme::Secp256k1,
+                    bytes: vec![0u8; 65], // Uncompressed public key
+                })
             }
         }
     }
@@ -97,10 +106,14 @@ impl ValidatorPrivateKey {
                     bytes: blake3::hash(data).as_bytes().to_vec(), // Temporary until silver-crypto is integrated
                 })
             }
-            SignatureScheme::Hybrid => {
-                Err(Error::InvalidData(
-                    "Hybrid signing requires separate keys".to_string(),
-                ))
+            SignatureScheme::Hybrid => Err(Error::InvalidData(
+                "Hybrid signing requires separate keys".to_string(),
+            )),
+            SignatureScheme::Secp256k1 => {
+                Ok(Signature {
+                    scheme: SignatureScheme::Secp256k1,
+                    bytes: blake3::hash(data).as_bytes().to_vec(), // Temporary until silver-crypto is integrated
+                })
             }
         }
     }
@@ -196,11 +209,10 @@ impl ValidatorKeyManager {
     /// * `key_dir` - Directory to store encrypted keys
     pub fn new<P: AsRef<Path>>(key_dir: P) -> Result<Self> {
         let key_dir = key_dir.as_ref().to_path_buf();
-        
+
         if !key_dir.exists() {
-            fs::create_dir_all(&key_dir).map_err(|e| {
-                Error::Internal(format!("Failed to create key directory: {}", e))
-            })?;
+            fs::create_dir_all(&key_dir)
+                .map_err(|e| Error::Internal(format!("Failed to create key directory: {}", e)))?;
         }
 
         let mut manager = Self {
@@ -219,7 +231,7 @@ impl ValidatorKeyManager {
     /// * `password` - Password to decrypt the keys
     pub fn load_keys(&mut self, password: &str) -> Result<()> {
         let key_file = self.key_dir.join("validator_keys.enc");
-        
+
         if !key_file.exists() {
             return Err(Error::InvalidData(format!(
                 "Key file not found: {}",
@@ -229,9 +241,8 @@ impl ValidatorKeyManager {
 
         info!("Loading validator keys from {}", key_file.display());
 
-        let encrypted_data = fs::read(&key_file).map_err(|e| {
-            Error::Internal(format!("Failed to read key file: {}", e))
-        })?;
+        let encrypted_data = fs::read(&key_file)
+            .map_err(|e| Error::Internal(format!("Failed to read key file: {}", e)))?;
 
         let encrypted_keys: EncryptedValidatorKeys = bincode::deserialize(&encrypted_data)
             .map_err(|e| Error::InvalidData(format!("Failed to deserialize keys: {}", e)))?;
@@ -280,7 +291,10 @@ impl ValidatorKeyManager {
         }
 
         self.current_keys = Some(key_set);
-        info!("Successfully loaded validator keys for address {}", encrypted_keys.address);
+        info!(
+            "Successfully loaded validator keys for address {}",
+            encrypted_keys.address
+        );
 
         Ok(())
     }
@@ -298,23 +312,14 @@ impl ValidatorKeyManager {
         let encryption_key = self.derive_key(password, &salt)?;
         let nonce = self.generate_nonce();
 
-        let encrypted_protocol = self.encrypt_key(
-            &key_set.protocol_key.bytes,
-            &encryption_key,
-            &nonce,
-        )?;
+        let encrypted_protocol =
+            self.encrypt_key(&key_set.protocol_key.bytes, &encryption_key, &nonce)?;
 
-        let encrypted_network = self.encrypt_key(
-            &key_set.network_key.bytes,
-            &encryption_key,
-            &nonce,
-        )?;
+        let encrypted_network =
+            self.encrypt_key(&key_set.network_key.bytes, &encryption_key, &nonce)?;
 
-        let encrypted_worker = self.encrypt_key(
-            &key_set.worker_key.bytes,
-            &encryption_key,
-            &nonce,
-        )?;
+        let encrypted_worker =
+            self.encrypt_key(&key_set.worker_key.bytes, &encryption_key, &nonce)?;
 
         let encrypted_keys = EncryptedValidatorKeys {
             version: 1,
@@ -337,9 +342,8 @@ impl ValidatorKeyManager {
         let serialized = bincode::serialize(&encrypted_keys)
             .map_err(|e| Error::InvalidData(format!("Failed to serialize keys: {}", e)))?;
 
-        fs::write(&key_file, serialized).map_err(|e| {
-            Error::Internal(format!("Failed to write key file: {}", e))
-        })?;
+        fs::write(&key_file, serialized)
+            .map_err(|e| Error::Internal(format!("Failed to write key file: {}", e)))?;
 
         info!("Successfully saved validator keys");
         Ok(())
@@ -355,7 +359,9 @@ impl ValidatorKeyManager {
     pub fn rotate_keys(&mut self, password: &str, reason: String) -> Result<ValidatorKeySet> {
         info!("Rotating validator keys: {}", reason);
 
-        let old_address = self.current_keys.as_ref()
+        let old_address = self
+            .current_keys
+            .as_ref()
             .map(|k| k.address)
             .unwrap_or_else(|| SilverAddress::new([0u8; 64]));
 
@@ -376,7 +382,10 @@ impl ValidatorKeyManager {
         self.save_rotation_history()?;
         self.current_keys = Some(new_key_set.clone());
 
-        info!("Key rotation complete: {} -> {}", old_address, new_key_set.address);
+        info!(
+            "Key rotation complete: {} -> {}",
+            old_address, new_key_set.address
+        );
         Ok(new_key_set)
     }
 
@@ -392,16 +401,16 @@ impl ValidatorKeyManager {
 
     fn derive_key(&self, password: &str, salt: &[u8]) -> Result<Vec<u8>> {
         use blake3::Hasher;
-        
+
         // Use Blake3 for key derivation (production systems should use Argon2id)
         // This provides cryptographically secure key derivation
         let mut hasher = Hasher::new();
         hasher.update(password.as_bytes());
         hasher.update(salt);
-        
+
         let mut key = vec![0u8; 32];
         hasher.finalize_xof().fill(&mut key);
-        
+
         Ok(key)
     }
 
@@ -410,11 +419,11 @@ impl ValidatorKeyManager {
         // This is cryptographically secure for demonstration
         let mut encrypted = data.to_vec();
         let key_stream = self.generate_key_stream(key, nonce, data.len());
-        
+
         for (i, byte) in encrypted.iter_mut().enumerate() {
             *byte ^= key_stream[i];
         }
-        
+
         Ok(encrypted)
     }
 
@@ -425,93 +434,84 @@ impl ValidatorKeyManager {
 
     fn generate_key_stream(&self, key: &[u8], nonce: &[u8], length: usize) -> Vec<u8> {
         use blake3::Hasher;
-        
+
         let mut stream = Vec::with_capacity(length);
         let mut hasher = Hasher::new();
         hasher.update(key);
         hasher.update(nonce);
-        
+
         let mut output = vec![0u8; length];
         hasher.finalize_xof().fill(&mut output);
         stream.extend_from_slice(&output);
-        
+
         stream
     }
 
     fn generate_salt(&self) -> Vec<u8> {
         use std::time::SystemTime;
-        
+
         // Generate cryptographically random salt using system entropy
         let mut salt = vec![0u8; 32];
         let timestamp = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        
+
         let mut hasher = blake3::Hasher::new();
         hasher.update(&timestamp.to_le_bytes());
         hasher.finalize_xof().fill(&mut salt);
-        
+
         salt
     }
 
     fn generate_nonce(&self) -> Vec<u8> {
         use std::time::SystemTime;
-        
+
         // Generate cryptographically random nonce
         let mut nonce = vec![0u8; 24];
         let timestamp = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        
+
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"nonce");
         hasher.update(&timestamp.to_le_bytes());
         hasher.finalize_xof().fill(&mut nonce);
-        
+
         nonce
     }
 
     fn generate_new_keys(&self) -> Result<ValidatorKeySet> {
         use std::time::SystemTime;
-        
+
         // Generate cryptographically secure random keys
         let timestamp = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        
+
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"protocol_key");
         hasher.update(&timestamp.to_le_bytes());
         let mut protocol_bytes = vec![0u8; 2528];
         hasher.finalize_xof().fill(&mut protocol_bytes);
-        
+
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"network_key");
         hasher.update(&timestamp.to_le_bytes());
         let mut network_bytes = vec![0u8; 2528];
         hasher.finalize_xof().fill(&mut network_bytes);
-        
+
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"worker_key");
         hasher.update(&timestamp.to_le_bytes());
         let mut worker_bytes = vec![0u8; 2528];
         hasher.finalize_xof().fill(&mut worker_bytes);
-        
-        let protocol_key = ValidatorPrivateKey::new(
-            SignatureScheme::Dilithium3,
-            protocol_bytes,
-        );
-        let network_key = ValidatorPrivateKey::new(
-            SignatureScheme::Dilithium3,
-            network_bytes,
-        );
-        let worker_key = ValidatorPrivateKey::new(
-            SignatureScheme::Dilithium3,
-            worker_bytes,
-        );
+
+        let protocol_key = ValidatorPrivateKey::new(SignatureScheme::Dilithium3, protocol_bytes);
+        let network_key = ValidatorPrivateKey::new(SignatureScheme::Dilithium3, network_bytes);
+        let worker_key = ValidatorPrivateKey::new(SignatureScheme::Dilithium3, worker_bytes);
 
         ValidatorKeySet::new(protocol_key, network_key, worker_key)
     }
@@ -522,7 +522,11 @@ impl ValidatorKeyManager {
             "Dilithium3" => Ok(SignatureScheme::Dilithium3),
             "Secp512r1" => Ok(SignatureScheme::Secp512r1),
             "Hybrid" => Ok(SignatureScheme::Hybrid),
-            _ => Err(Error::InvalidData(format!("Unknown signature scheme: {}", scheme_str))),
+            "Secp256k1" => Ok(SignatureScheme::Secp256k1),
+            _ => Err(Error::InvalidData(format!(
+                "Unknown signature scheme: {}",
+                scheme_str
+            ))),
         }
     }
 
@@ -532,6 +536,7 @@ impl ValidatorKeyManager {
             SignatureScheme::Dilithium3 => "Dilithium3".to_string(),
             SignatureScheme::Secp512r1 => "Secp512r1".to_string(),
             SignatureScheme::Hybrid => "Hybrid".to_string(),
+            SignatureScheme::Secp256k1 => "Secp256k1".to_string(),
         }
     }
 
@@ -539,24 +544,22 @@ impl ValidatorKeyManager {
         let history_file = self.key_dir.join("rotation_history.json");
         let json = serde_json::to_string_pretty(&self.rotation_history)
             .map_err(|e| Error::InvalidData(format!("Failed to serialize history: {}", e)))?;
-        
-        fs::write(&history_file, json).map_err(|e| {
-            Error::Internal(format!("Failed to write rotation history: {}", e))
-        })?;
+
+        fs::write(&history_file, json)
+            .map_err(|e| Error::Internal(format!("Failed to write rotation history: {}", e)))?;
 
         Ok(())
     }
 
     fn load_rotation_history(&mut self) -> Result<()> {
         let history_file = self.key_dir.join("rotation_history.json");
-        
+
         if !history_file.exists() {
             return Ok(());
         }
 
-        let json = fs::read_to_string(&history_file).map_err(|e| {
-            Error::Internal(format!("Failed to read rotation history: {}", e))
-        })?;
+        let json = fs::read_to_string(&history_file)
+            .map_err(|e| Error::Internal(format!("Failed to read rotation history: {}", e)))?;
 
         self.rotation_history = serde_json::from_str(&json)
             .map_err(|e| Error::InvalidData(format!("Failed to parse history: {}", e)))?;

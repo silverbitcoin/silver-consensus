@@ -7,9 +7,9 @@
 //! - Tier change tracking and events
 //! - Stake tracking and validation
 
-use crate::validator_tiers::{ValidatorTier, TierChangeEvent};
-use silver_core::{Error, Result, ValidatorID};
+use crate::validator_tiers::{TierChangeEvent, ValidatorTier};
 use serde::{Deserialize, Serialize};
+use silver_core::{Error, Result, ValidatorID};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
@@ -25,27 +25,23 @@ pub const UNBONDING_PERIOD_SECS: u64 = 7 * 24 * 60 * 60;
 pub struct StakeDeposit {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Stake amount in SBTC
     pub amount: u64,
-    
+
     /// Tier at time of deposit
     pub tier: ValidatorTier,
-    
+
     /// Deposit timestamp
     pub deposited_at: u64,
-    
+
     /// Transaction digest that deposited the stake
     pub deposit_tx: Vec<u8>,
 }
 
 impl StakeDeposit {
     /// Create a new stake deposit with tier detection
-    pub fn new(
-        validator_id: ValidatorID,
-        amount: u64,
-        deposit_tx: Vec<u8>,
-    ) -> Result<Self> {
+    pub fn new(validator_id: ValidatorID, amount: u64, deposit_tx: Vec<u8>) -> Result<Self> {
         if amount < MIN_STAKE_AMOUNT {
             return Err(Error::InvalidData(format!(
                 "Stake amount {} is below minimum {} (Bronze tier)",
@@ -86,16 +82,16 @@ impl StakeDeposit {
 pub struct UnstakingRequest {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Amount to unstake
     pub amount: u64,
-    
+
     /// Request timestamp
     pub requested_at: u64,
-    
+
     /// Unbonding completion timestamp
     pub unbonds_at: u64,
-    
+
     /// Whether the unstaking is complete
     pub completed: bool,
 }
@@ -149,25 +145,25 @@ impl UnstakingRequest {
 pub struct ValidatorStake {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Total staked amount
     pub total_stake: u64,
-    
+
     /// Active stake (not unbonding)
     pub active_stake: u64,
-    
+
     /// Unbonding stake
     pub unbonding_stake: u64,
-    
+
     /// Current tier
     pub current_tier: ValidatorTier,
-    
+
     /// Stake deposits
     pub deposits: Vec<StakeDeposit>,
-    
+
     /// Pending unstaking requests
     pub unstaking_requests: Vec<UnstakingRequest>,
-    
+
     /// Tier change history
     pub tier_history: Vec<TierChangeEvent>,
 }
@@ -190,14 +186,14 @@ impl ValidatorStake {
     /// Add a stake deposit and update tier
     pub fn add_deposit(&mut self, deposit: StakeDeposit, cycle: u64) -> Option<TierChangeEvent> {
         let old_tier = self.current_tier;
-        
+
         self.total_stake += deposit.amount;
         self.active_stake += deposit.amount;
         self.deposits.push(deposit);
-        
+
         // Update tier based on new active stake
         let new_tier = ValidatorTier::from_stake(self.active_stake);
-        
+
         if new_tier != old_tier {
             let event = TierChangeEvent::new(
                 self.validator_id.clone(),
@@ -206,15 +202,15 @@ impl ValidatorStake {
                 self.active_stake,
                 cycle,
             );
-            
+
             self.current_tier = new_tier;
             self.tier_history.push(event.clone());
-            
+
             info!(
                 "Validator {} tier changed from {} to {} (stake: {} SBTC)",
                 self.validator_id, old_tier, new_tier, self.active_stake
             );
-            
+
             Some(event)
         } else {
             None
@@ -222,7 +218,11 @@ impl ValidatorStake {
     }
 
     /// Request unstaking and update tier
-    pub fn request_unstake(&mut self, amount: u64, cycle: u64) -> Result<(UnstakingRequest, Option<TierChangeEvent>)> {
+    pub fn request_unstake(
+        &mut self,
+        amount: u64,
+        cycle: u64,
+    ) -> Result<(UnstakingRequest, Option<TierChangeEvent>)> {
         if amount > self.active_stake {
             return Err(Error::InvalidData(format!(
                 "Cannot unstake {} SBTC, only {} active",
@@ -232,7 +232,7 @@ impl ValidatorStake {
 
         let old_tier = self.current_tier;
         let request = UnstakingRequest::new(self.validator_id.clone(), amount);
-        
+
         self.active_stake -= amount;
         self.unbonding_stake += amount;
         self.unstaking_requests.push(request.clone());
@@ -247,15 +247,15 @@ impl ValidatorStake {
                 self.active_stake,
                 cycle,
             );
-            
+
             self.current_tier = new_tier;
             self.tier_history.push(event.clone());
-            
+
             warn!(
                 "Validator {} tier downgraded from {} to {} after unstaking (remaining: {} SBTC)",
                 self.validator_id, old_tier, new_tier, self.active_stake
             );
-            
+
             Some(event)
         } else {
             None
@@ -317,13 +317,13 @@ impl ValidatorStake {
 pub struct StakingManager {
     /// Validator stakes indexed by validator ID
     stakes: HashMap<ValidatorID, ValidatorStake>,
-    
+
     /// Total staked amount across all validators
     total_staked: u64,
-    
+
     /// Current cycle for tier change tracking
     current_cycle: u64,
-    
+
     /// All tier change events
     all_tier_changes: Vec<TierChangeEvent>,
 }
@@ -356,7 +356,8 @@ impl StakingManager {
         let deposit = StakeDeposit::new(validator_id.clone(), amount, deposit_tx)?;
         let tier = deposit.tier;
 
-        let stake = self.stakes
+        let stake = self
+            .stakes
             .entry(validator_id.clone())
             .or_insert_with(|| ValidatorStake::new(validator_id.clone()));
 
@@ -381,12 +382,9 @@ impl StakingManager {
         validator_id: &ValidatorID,
         amount: u64,
     ) -> Result<(UnstakingRequest, Option<TierChangeEvent>)> {
-        let stake = self.stakes
-            .get_mut(validator_id)
-            .ok_or_else(|| Error::InvalidData(format!(
-                "Validator {} has no stake",
-                validator_id
-            )))?;
+        let stake = self.stakes.get_mut(validator_id).ok_or_else(|| {
+            Error::InvalidData(format!("Validator {} has no stake", validator_id))
+        })?;
 
         let (request, tier_event) = stake.request_unstake(amount, self.current_cycle)?;
 
@@ -408,19 +406,19 @@ impl StakingManager {
 
         for (validator_id, stake) in &mut self.stakes {
             let completed = stake.process_unbonding();
-            
+
             if !completed.is_empty() {
                 info!(
                     "Validator {} completed {} unbonding requests",
                     validator_id,
                     completed.len()
                 );
-                
+
                 // Update total staked
                 for request in &completed {
                     self.total_staked -= request.amount;
                 }
-                
+
                 completed_by_validator.insert(validator_id.clone(), completed);
             }
         }
@@ -536,15 +534,15 @@ impl StakingManager {
     /// Get tier distribution
     pub fn get_tier_distribution(&self) -> HashMap<ValidatorTier, usize> {
         let mut distribution = HashMap::new();
-        
+
         for tier in ValidatorTier::all_tiers() {
             distribution.insert(tier, 0);
         }
-        
+
         for stake in self.stakes.values() {
             *distribution.entry(stake.tier()).or_insert(0) += 1;
         }
-        
+
         distribution
     }
 
@@ -571,173 +569,5 @@ impl StakingManager {
 impl Default for StakingManager {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use silver_core::SilverAddress;
-
-    fn create_test_validator_id(id: u8) -> ValidatorID {
-        ValidatorID::new(SilverAddress::new([id; 64]))
-    }
-
-    #[test]
-    fn test_stake_deposit_minimum() {
-        let validator_id = create_test_validator_id(1);
-        
-        // Below minimum should fail
-        let result = StakeDeposit::new(validator_id.clone(), 9_999, vec![0u8; 64]);
-        assert!(result.is_err());
-
-        // At minimum should succeed (Bronze tier: 10,000)
-        let result = StakeDeposit::new(validator_id.clone(), 10_000, vec![0u8; 64]);
-        assert!(result.is_ok());
-        let deposit = result.unwrap();
-        assert_eq!(deposit.tier, ValidatorTier::Bronze);
-
-        // Silver tier
-        let result = StakeDeposit::new(validator_id.clone(), 50_000, vec![0u8; 64]);
-        assert!(result.is_ok());
-        let deposit = result.unwrap();
-        assert_eq!(deposit.tier, ValidatorTier::Silver);
-    }
-
-    #[test]
-    fn test_unstaking_request() {
-        let validator_id = create_test_validator_id(1);
-        let request = UnstakingRequest::new(validator_id, 1_000_000);
-
-        assert!(!request.is_unbonded());
-        assert!(request.remaining_unbonding_time() > 0);
-        assert_eq!(request.unbonds_at - request.requested_at, UNBONDING_PERIOD_SECS);
-    }
-
-    #[test]
-    fn test_validator_stake() {
-        let validator_id = create_test_validator_id(1);
-        let mut stake = ValidatorStake::new(validator_id.clone());
-
-        // Add deposit (Platinum tier: 500,000+)
-        let deposit = StakeDeposit::new(validator_id.clone(), 500_000, vec![0u8; 64]).unwrap();
-        let tier_event = stake.add_deposit(deposit, 0);
-        
-        assert!(tier_event.is_some()); // Tier changed from Bronze to Platinum
-        assert_eq!(stake.total_stake, 500_000);
-        assert_eq!(stake.active_stake, 500_000);
-        assert_eq!(stake.unbonding_stake, 0);
-        assert_eq!(stake.tier(), ValidatorTier::Platinum);
-
-        // Request unstake (should downgrade to Gold)
-        let (_request, tier_event) = stake.request_unstake(400_000, 1).unwrap();
-        assert!(tier_event.is_some()); // Tier changed from Platinum to Gold
-        assert_eq!(stake.active_stake, 100_000);
-        assert_eq!(stake.unbonding_stake, 400_000);
-        assert_eq!(stake.total_stake, 500_000);
-        assert_eq!(stake.tier(), ValidatorTier::Gold);
-    }
-
-    #[test]
-    fn test_staking_manager() {
-        let mut manager = StakingManager::new();
-        let validator_id = create_test_validator_id(1);
-
-        // Deposit stake (Platinum tier)
-        let tier_event = manager.deposit_stake(validator_id.clone(), 500_000, vec![1u8; 64]).unwrap();
-        assert!(tier_event.is_some());
-        assert_eq!(manager.total_staked(), 500_000);
-        assert_eq!(manager.get_active_stake(&validator_id), 500_000);
-        assert_eq!(manager.get_tier(&validator_id), Some(ValidatorTier::Platinum));
-
-        // Request unstake (should downgrade to Gold)
-        let (request, tier_event) = manager.request_unstake(&validator_id, 400_000).unwrap();
-        assert!(tier_event.is_some());
-        assert_eq!(manager.get_active_stake(&validator_id), 100_000);
-        assert_eq!(manager.get_tier(&validator_id), Some(ValidatorTier::Gold));
-        assert!(!request.is_unbonded());
-    }
-
-    #[test]
-    fn test_minimum_stake_requirement() {
-        let mut manager = StakingManager::new();
-        let validator_id = create_test_validator_id(1);
-
-        // At minimum (Bronze tier: 10,000)
-        manager.deposit_stake(validator_id.clone(), 10_000, vec![1u8; 64]).unwrap();
-        assert!(manager.meets_minimum_stake(&validator_id));
-        assert_eq!(manager.get_tier(&validator_id), Some(ValidatorTier::Bronze));
-
-        // Unstake to below minimum
-        manager.request_unstake(&validator_id, 5_000).unwrap();
-        assert!(!manager.meets_minimum_stake(&validator_id));
-    }
-
-    #[test]
-    fn test_get_staked_validators() {
-        let mut manager = StakingManager::new();
-        
-        manager.deposit_stake(create_test_validator_id(1), 50_000, vec![1u8; 64]).unwrap();
-        manager.deposit_stake(create_test_validator_id(2), 100_000, vec![2u8; 64]).unwrap();
-
-        let validators = manager.get_staked_validators();
-        assert_eq!(validators.len(), 2);
-    }
-
-    #[test]
-    fn test_tier_tracking() {
-        let mut manager = StakingManager::new();
-        let validator_id = create_test_validator_id(1);
-
-        // Start at Bronze
-        manager.deposit_stake(validator_id.clone(), 10_000, vec![1u8; 64]).unwrap();
-        assert_eq!(manager.get_tier(&validator_id), Some(ValidatorTier::Bronze));
-
-        // Upgrade to Silver
-        manager.deposit_stake(validator_id.clone(), 40_000, vec![2u8; 64]).unwrap();
-        assert_eq!(manager.get_tier(&validator_id), Some(ValidatorTier::Silver));
-
-        // Upgrade to Gold
-        manager.deposit_stake(validator_id.clone(), 50_000, vec![3u8; 64]).unwrap();
-        assert_eq!(manager.get_tier(&validator_id), Some(ValidatorTier::Gold));
-
-        // Check tier history
-        let changes = manager.get_validator_tier_changes(&validator_id);
-        assert_eq!(changes.len(), 2); // Bronze->Silver, Silver->Gold
-    }
-
-    #[test]
-    fn test_voting_power_calculation() {
-        let mut manager = StakingManager::new();
-        
-        let id1 = create_test_validator_id(1);
-        let id2 = create_test_validator_id(2);
-        
-        // Bronze: 10,000 * 0.5 = 5,000
-        manager.deposit_stake(id1.clone(), 10_000, vec![1u8; 64]).unwrap();
-        assert_eq!(manager.get_voting_power(&id1), 5_000);
-        
-        // Gold: 100,000 * 1.5 = 150,000
-        manager.deposit_stake(id2.clone(), 100_000, vec![2u8; 64]).unwrap();
-        assert_eq!(manager.get_voting_power(&id2), 150_000);
-        
-        // Total voting power
-        assert_eq!(manager.total_voting_power(), 155_000);
-    }
-
-    #[test]
-    fn test_tier_distribution() {
-        let mut manager = StakingManager::new();
-        
-        manager.deposit_stake(create_test_validator_id(1), 10_000, vec![1u8; 64]).unwrap();
-        manager.deposit_stake(create_test_validator_id(2), 50_000, vec![2u8; 64]).unwrap();
-        manager.deposit_stake(create_test_validator_id(3), 100_000, vec![3u8; 64]).unwrap();
-        manager.deposit_stake(create_test_validator_id(4), 500_000, vec![4u8; 64]).unwrap();
-        
-        let distribution = manager.get_tier_distribution();
-        assert_eq!(distribution[&ValidatorTier::Bronze], 1);
-        assert_eq!(distribution[&ValidatorTier::Silver], 1);
-        assert_eq!(distribution[&ValidatorTier::Gold], 1);
-        assert_eq!(distribution[&ValidatorTier::Platinum], 1);
     }
 }

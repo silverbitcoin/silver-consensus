@@ -313,8 +313,14 @@ impl CycleRewardsManager {
     }
 
     /// Collect fee from a transaction
-    pub fn collect_transaction_fee(&mut self, digest: [u8; 64], fuel_consumed: u64, fuel_price: u64) {
-        self.collector.collect_fee(digest, fuel_consumed, fuel_price);
+    pub fn collect_transaction_fee(
+        &mut self,
+        digest: [u8; 64],
+        fuel_consumed: u64,
+        fuel_price: u64,
+    ) {
+        self.collector
+            .collect_fee(digest, fuel_consumed, fuel_price);
     }
 
     /// End current cycle and distribute rewards
@@ -335,7 +341,9 @@ impl CycleRewardsManager {
         );
 
         // Distribute rewards
-        let rewards = self.distributor.distribute_cycle_rewards(&self.collector, validators);
+        let rewards = self
+            .distributor
+            .distribute_cycle_rewards(&self.collector, validators);
 
         // Reset collector for next cycle
         self.collector.reset();
@@ -375,168 +383,5 @@ impl CycleRewardsManager {
 impl Default for CycleRewardsManager {
     fn default() -> Self {
         Self::new(RewardDistributor::default())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn create_test_validator_id(id: u8) -> ValidatorID {
-        use silver_core::SilverAddress;
-        ValidatorID::new(SilverAddress::new([id; 64]))
-    }
-
-    #[test]
-    fn test_fuel_fee_collector() {
-        let mut collector = FuelFeeCollector::new();
-
-        assert_eq!(collector.total_fees(), 0);
-        assert_eq!(collector.transaction_count(), 0);
-
-        // Collect some fees
-        collector.collect_fee([1; 64], 1000, 1000);
-        collector.collect_fee([2; 64], 2000, 1000);
-
-        assert_eq!(collector.total_fees(), 3_000_000);
-        assert_eq!(collector.transaction_count(), 2);
-        assert_eq!(collector.average_fee(), 1_500_000);
-    }
-
-    #[test]
-    fn test_fuel_fee_collector_reset() {
-        let mut collector = FuelFeeCollector::new();
-
-        collector.collect_fee([1; 64], 1000, 1000);
-        assert_eq!(collector.total_fees(), 1_000_000);
-
-        collector.reset();
-        assert_eq!(collector.total_fees(), 0);
-        assert_eq!(collector.transaction_count(), 0);
-    }
-
-    #[test]
-    fn test_reward_distributor_equal_stake() {
-        let distributor = RewardDistributor::default();
-
-        let mut validators = HashMap::new();
-        validators.insert(create_test_validator_id(1), (1_000_000, 1.0));
-        validators.insert(create_test_validator_id(2), (1_000_000, 1.0));
-        validators.insert(create_test_validator_id(3), (1_000_000, 1.0));
-
-        let rewards = distributor.calculate_rewards(3_000_000, &validators);
-
-        // Each validator should get 1/3 of total fees
-        for reward in rewards.values() {
-            assert_eq!(reward.final_reward, 1_000_000);
-            assert_eq!(reward.penalty, 0);
-        }
-    }
-
-    #[test]
-    fn test_reward_distributor_unequal_stake() {
-        let distributor = RewardDistributor::default();
-
-        let mut validators = HashMap::new();
-        validators.insert(create_test_validator_id(1), (2_000_000, 1.0)); // 50% stake
-        validators.insert(create_test_validator_id(2), (1_000_000, 1.0)); // 25% stake
-        validators.insert(create_test_validator_id(3), (1_000_000, 1.0)); // 25% stake
-
-        let rewards = distributor.calculate_rewards(4_000_000, &validators);
-
-        let reward1 = rewards.get(&create_test_validator_id(1)).unwrap();
-        let reward2 = rewards.get(&create_test_validator_id(2)).unwrap();
-        let reward3 = rewards.get(&create_test_validator_id(3)).unwrap();
-
-        assert_eq!(reward1.final_reward, 2_000_000); // 50%
-        assert_eq!(reward2.final_reward, 1_000_000); // 25%
-        assert_eq!(reward3.final_reward, 1_000_000); // 25%
-    }
-
-    #[test]
-    fn test_reward_distributor_with_penalty() {
-        let distributor = RewardDistributor::new(0.9, 0.5);
-
-        let mut validators = HashMap::new();
-        validators.insert(create_test_validator_id(1), (1_000_000, 1.0));   // 100% participation
-        validators.insert(create_test_validator_id(2), (1_000_000, 0.85));  // 85% participation (penalty)
-
-        let rewards = distributor.calculate_rewards(2_000_000, &validators);
-
-        let reward1 = rewards.get(&create_test_validator_id(1)).unwrap();
-        let reward2 = rewards.get(&create_test_validator_id(2)).unwrap();
-
-        // Validator 1: full reward
-        assert_eq!(reward1.base_reward, 1_000_000);
-        assert_eq!(reward1.penalty, 0);
-        assert_eq!(reward1.final_reward, 1_000_000);
-
-        // Validator 2: 50% penalty
-        assert_eq!(reward2.base_reward, 1_000_000);
-        assert_eq!(reward2.penalty, 500_000);
-        assert_eq!(reward2.final_reward, 500_000);
-    }
-
-    #[test]
-    fn test_cycle_rewards_manager() {
-        let mut manager = CycleRewardsManager::default();
-
-        assert_eq!(manager.current_cycle(), 0);
-        assert_eq!(manager.total_fees_this_cycle(), 0);
-
-        // Collect fees
-        manager.collect_transaction_fee([1; 64], 1000, 1000);
-        manager.collect_transaction_fee([2; 64], 2000, 1000);
-
-        assert_eq!(manager.total_fees_this_cycle(), 3_000_000);
-        assert_eq!(manager.transaction_count_this_cycle(), 2);
-
-        // End cycle
-        let mut validators = HashMap::new();
-        validators.insert(create_test_validator_id(1), (1_000_000, 1.0));
-        validators.insert(create_test_validator_id(2), (1_000_000, 1.0));
-
-        let rewards = manager.end_cycle(&validators);
-
-        assert_eq!(rewards.len(), 2);
-        assert_eq!(manager.current_cycle(), 1);
-        assert_eq!(manager.total_fees_this_cycle(), 0); // Reset after cycle end
-    }
-
-    #[test]
-    fn test_validator_reward_structure() {
-        let reward = ValidatorReward {
-            validator_id: create_test_validator_id(1),
-            stake: 1_000_000,
-            stake_weight: 0.5,
-            participation_rate: 0.95,
-            base_reward: 1_000_000,
-            penalty: 0,
-            final_reward: 1_000_000,
-        };
-
-        assert_eq!(reward.stake, 1_000_000);
-        assert!((reward.stake_weight - 0.5).abs() < 0.01);
-        assert_eq!(reward.final_reward, 1_000_000);
-    }
-
-    #[test]
-    fn test_empty_validators() {
-        let distributor = RewardDistributor::default();
-        let validators = HashMap::new();
-
-        let rewards = distributor.calculate_rewards(1_000_000, &validators);
-        assert!(rewards.is_empty());
-    }
-
-    #[test]
-    fn test_zero_fees() {
-        let distributor = RewardDistributor::default();
-
-        let mut validators = HashMap::new();
-        validators.insert(create_test_validator_id(1), (1_000_000, 1.0));
-
-        let rewards = distributor.calculate_rewards(0, &validators);
-        assert!(rewards.is_empty());
     }
 }

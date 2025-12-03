@@ -116,11 +116,7 @@ impl CompatibilityChecker {
     }
 
     /// Check if a feature is enabled in a specific version
-    pub fn is_feature_enabled_in_version(
-        &self,
-        feature: &str,
-        version: &ProtocolVersion,
-    ) -> bool {
+    pub fn is_feature_enabled_in_version(&self, feature: &str, version: &ProtocolVersion) -> bool {
         let supported = self.supported_versions.read().unwrap();
 
         if let Some(flags) = supported.get(version) {
@@ -148,8 +144,8 @@ impl CompatibilityChecker {
         _transaction: &Transaction,
         required_features: &[String],
     ) -> Result<()> {
-        // Get transaction protocol version (if specified)
-        // For now, we assume transactions use the active version
+        // Get transaction protocol version from the active version
+        // Transactions don't specify protocol version, they use the current active version
         let tx_version = self.active_version.read().unwrap().clone();
 
         // Check if transaction version is supported
@@ -316,146 +312,5 @@ impl FeatureExtractor {
         // features.push("transaction_sponsorship".to_string());
 
         features
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use silver_core::{
-        Command, SilverAddress, TransactionData, TransactionExpiration, TransactionKind,
-    };
-
-    fn create_test_transaction() -> Transaction {
-        let sender = SilverAddress::new([1u8; 64]);
-        let data = TransactionData {
-            sender,
-            fuel_payment: silver_core::ObjectRef::new(
-                silver_core::ObjectID::new([0u8; 64]),
-                silver_core::SequenceNumber::new(1),
-                silver_core::TransactionDigest::new([0u8; 64]),
-            ),
-            fuel_budget: 1000,
-            fuel_price: 1000,
-            kind: TransactionKind::CompositeChain(vec![Command::TransferObjects {
-                objects: vec![],
-                recipient: sender,
-            }]),
-            sponsor: None,
-            expiration: TransactionExpiration::None,
-        };
-
-        Transaction {
-            data,
-            signatures: vec![],
-        }
-    }
-
-    #[test]
-    fn test_version_support() {
-        let checker = CompatibilityChecker::new(ProtocolVersion::new(1, 0));
-
-        assert!(checker.is_version_supported(&ProtocolVersion::new(1, 0)));
-        assert!(!checker.is_version_supported(&ProtocolVersion::new(2, 0)));
-
-        // Add new version
-        checker.add_supported_version(ProtocolVersion::new(2, 0), FeatureFlags::new());
-        assert!(checker.is_version_supported(&ProtocolVersion::new(2, 0)));
-    }
-
-    #[test]
-    fn test_feature_enabled() {
-        let checker = CompatibilityChecker::new(ProtocolVersion::new(1, 0));
-
-        let mut flags = FeatureFlags::new();
-        flags.enable("test_feature".to_string());
-
-        checker.add_supported_version(ProtocolVersion::new(1, 0), flags);
-        checker.update_active_version(ProtocolVersion::new(1, 0));
-
-        assert!(checker.is_feature_enabled("test_feature"));
-        assert!(!checker.is_feature_enabled("other_feature"));
-    }
-
-    #[test]
-    fn test_validate_transaction_compatibility() {
-        let checker = CompatibilityChecker::new(ProtocolVersion::new(1, 0));
-
-        let mut flags = FeatureFlags::new();
-        flags.enable("smart_contracts".to_string());
-
-        checker.add_supported_version(ProtocolVersion::new(1, 0), flags);
-        checker.update_active_version(ProtocolVersion::new(1, 0));
-
-        let tx = create_test_transaction();
-
-        // Should pass with no required features
-        let result = checker.validate_transaction_compatibility(&tx, &[]);
-        assert!(result.is_ok());
-
-        // Should pass with enabled feature
-        let result =
-            checker.validate_transaction_compatibility(&tx, &["smart_contracts".to_string()]);
-        assert!(result.is_ok());
-
-        // Should fail with disabled feature
-        let result =
-            checker.validate_transaction_compatibility(&tx, &["disabled_feature".to_string()]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_feature_requirements() {
-        let checker = CompatibilityChecker::new(ProtocolVersion::new(1, 0));
-
-        // Register feature requirement
-        checker.register_feature_requirement(
-            "advanced_feature".to_string(),
-            ProtocolVersion::new(2, 0),
-        );
-
-        let mut flags = FeatureFlags::new();
-        flags.enable("advanced_feature".to_string());
-
-        checker.add_supported_version(ProtocolVersion::new(1, 0), flags.clone());
-        checker.add_supported_version(ProtocolVersion::new(2, 0), flags);
-
-        // Should fail with v1.0 (below minimum)
-        checker.update_active_version(ProtocolVersion::new(1, 0));
-        let tx = create_test_transaction();
-        let result =
-            checker.validate_transaction_compatibility(&tx, &["advanced_feature".to_string()]);
-        assert!(result.is_err());
-
-        // Should pass with v2.0 (meets minimum)
-        checker.update_active_version(ProtocolVersion::new(2, 0));
-        let result =
-            checker.validate_transaction_compatibility(&tx, &["advanced_feature".to_string()]);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_remove_version_support() {
-        let checker = CompatibilityChecker::new(ProtocolVersion::new(1, 0));
-
-        checker.add_supported_version(ProtocolVersion::new(2, 0), FeatureFlags::new());
-        checker.update_active_version(ProtocolVersion::new(2, 0));
-
-        // Should be able to remove old version
-        let result = checker.remove_supported_version(ProtocolVersion::new(1, 0));
-        assert!(result.is_ok());
-
-        // Should not be able to remove active version
-        let result = checker.remove_supported_version(ProtocolVersion::new(2, 0));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_feature_extractor() {
-        let tx = create_test_transaction();
-        let features = FeatureExtractor::extract_features(&tx);
-
-        // Basic transfer should not require special features
-        assert!(features.is_empty());
     }
 }

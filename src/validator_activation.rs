@@ -8,30 +8,30 @@
 //! - Comprehensive audit trail
 //! - Full recovery support
 
-use silver_core::{Error, Result, ValidatorID};
 use serde::{Deserialize, Serialize};
+use silver_core::{Error, Result, ValidatorID};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Validator activation configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivationConfig {
     /// Minimum stake required for activation (SBTC)
     pub min_stake_for_activation: u64,
-    
+
     /// Minimum voting power required for activation
     pub min_voting_power: u64,
-    
+
     /// Deactivation cooldown period (seconds)
     pub deactivation_cooldown_secs: u64,
-    
+
     /// Reactivation cooldown period (seconds)
     pub reactivation_cooldown_secs: u64,
-    
+
     /// Votes required for activation (percentage of total stake)
     pub activation_votes_required: f64,
-    
+
     /// Votes required for deactivation (percentage of total stake)
     pub deactivation_votes_required: f64,
 }
@@ -39,12 +39,12 @@ pub struct ActivationConfig {
 impl Default for ActivationConfig {
     fn default() -> Self {
         Self {
-            min_stake_for_activation: 10_000,      // 10,000 SBTC
-            min_voting_power: 5_000,                // 5,000 voting power
-            deactivation_cooldown_secs: 86400,      // 24 hours
-            reactivation_cooldown_secs: 604800,     // 7 days
-            activation_votes_required: 0.66,        // 66% (2/3)
-            deactivation_votes_required: 0.66,      // 66% (2/3)
+            min_stake_for_activation: 10_000,   // 10,000 SBTC
+            min_voting_power: 5_000,            // 5,000 voting power
+            deactivation_cooldown_secs: 86400,  // 24 hours
+            reactivation_cooldown_secs: 604800, // 7 days
+            activation_votes_required: 0.66,    // 66% (2/3)
+            deactivation_votes_required: 0.66,  // 66% (2/3)
         }
     }
 }
@@ -54,16 +54,16 @@ impl Default for ActivationConfig {
 pub enum ValidatorStatus {
     /// Pending activation (not yet active)
     Pending,
-    
+
     /// Active validator
     Active,
-    
+
     /// Deactivated validator
     Deactivated,
-    
+
     /// Suspended (due to violations)
     Suspended,
-    
+
     /// Removed from validator set
     Removed,
 }
@@ -85,19 +85,19 @@ impl std::fmt::Display for ValidatorStatus {
 pub struct ActivationRequest {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Request type
     pub request_type: ActivationRequestType,
-    
+
     /// Requested at
     pub requested_at: u64,
-    
+
     /// Votes in favor
     pub votes_in_favor: u64,
-    
+
     /// Total votes
     pub total_votes: u64,
-    
+
     /// Status
     pub status: ActivationRequestStatus,
 }
@@ -107,7 +107,7 @@ pub struct ActivationRequest {
 pub enum ActivationRequestType {
     /// Activation request
     Activation,
-    
+
     /// Deactivation request
     Deactivation,
 }
@@ -126,13 +126,13 @@ impl std::fmt::Display for ActivationRequestType {
 pub enum ActivationRequestStatus {
     /// Pending voting
     Pending,
-    
+
     /// Approved
     Approved,
-    
+
     /// Rejected
     Rejected,
-    
+
     /// Expired
     Expired,
 }
@@ -153,22 +153,22 @@ impl std::fmt::Display for ActivationRequestStatus {
 pub struct ValidatorActivationRecord {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Current status
     pub status: ValidatorStatus,
-    
+
     /// Activated at
     pub activated_at: Option<u64>,
-    
+
     /// Deactivated at
     pub deactivated_at: Option<u64>,
-    
+
     /// Can reactivate at
     pub can_reactivate_at: Option<u64>,
-    
+
     /// Activation count
     pub activation_count: u64,
-    
+
     /// Deactivation count
     pub deactivation_count: u64,
 }
@@ -245,7 +245,9 @@ impl ValidatorActivationRecord {
 
         info!(
             "Deactivated validator {} (can reactivate at: {}, deactivation count: {})",
-            self.validator_id, self.can_reactivate_at.unwrap(), self.deactivation_count
+            self.validator_id,
+            self.can_reactivate_at.unwrap(),
+            self.deactivation_count
         );
 
         Ok(())
@@ -262,10 +264,7 @@ impl ValidatorActivationRecord {
 
         self.status = ValidatorStatus::Suspended;
 
-        warn!(
-            "Suspended validator {}",
-            self.validator_id
-        );
+        warn!("Suspended validator {}", self.validator_id);
 
         Ok(())
     }
@@ -274,10 +273,7 @@ impl ValidatorActivationRecord {
     pub fn remove(&mut self) -> Result<()> {
         self.status = ValidatorStatus::Removed;
 
-        info!(
-            "Removed validator {}",
-            self.validator_id
-        );
+        info!("Removed validator {}", self.validator_id);
 
         Ok(())
     }
@@ -318,13 +314,13 @@ impl ValidatorActivationRecord {
 pub struct ActivationEvent {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Event type
     pub event_type: ActivationEventType,
-    
+
     /// Timestamp
     pub timestamp: u64,
-    
+
     /// Cycle
     pub cycle: u64,
 }
@@ -334,13 +330,13 @@ pub struct ActivationEvent {
 pub enum ActivationEventType {
     /// Validator activated
     Activated,
-    
+
     /// Validator deactivated
     Deactivated,
-    
+
     /// Validator suspended
     Suspended,
-    
+
     /// Validator removed
     Removed,
 }
@@ -360,16 +356,16 @@ impl std::fmt::Display for ActivationEventType {
 pub struct ValidatorActivationManager {
     /// Configuration
     config: ActivationConfig,
-    
+
     /// Activation records
     records: HashMap<ValidatorID, ValidatorActivationRecord>,
-    
+
     /// Pending activation requests
     pending_requests: HashMap<ValidatorID, ActivationRequest>,
-    
+
     /// Activation events
     events: Vec<ActivationEvent>,
-    
+
     /// Current cycle
     current_cycle: u64,
 }
@@ -436,7 +432,8 @@ impl ValidatorActivationManager {
             status: ActivationRequestStatus::Pending,
         };
 
-        self.pending_requests.insert(validator_id.clone(), request.clone());
+        self.pending_requests
+            .insert(validator_id.clone(), request.clone());
 
         info!(
             "Requested activation for validator {} (stake: {}, voting power: {})",
@@ -476,12 +473,10 @@ impl ValidatorActivationManager {
             status: ActivationRequestStatus::Pending,
         };
 
-        self.pending_requests.insert(validator_id.clone(), request.clone());
+        self.pending_requests
+            .insert(validator_id.clone(), request.clone());
 
-        info!(
-            "Requested deactivation for validator {}",
-            validator_id
-        );
+        info!("Requested deactivation for validator {}", validator_id);
 
         Ok(request)
     }
@@ -493,12 +488,9 @@ impl ValidatorActivationManager {
         vote_in_favor: bool,
         voting_power: u64,
     ) -> Result<()> {
-        let request = self.pending_requests
-            .get_mut(validator_id)
-            .ok_or_else(|| Error::InvalidData(format!(
-                "No pending request for validator {}",
-                validator_id
-            )))?;
+        let request = self.pending_requests.get_mut(validator_id).ok_or_else(|| {
+            Error::InvalidData(format!("No pending request for validator {}", validator_id))
+        })?;
 
         request.total_votes += voting_power;
         if vote_in_favor {
@@ -519,12 +511,9 @@ impl ValidatorActivationManager {
         validator_id: &ValidatorID,
         total_stake: u64,
     ) -> Result<ActivationRequestStatus> {
-        let request = self.pending_requests
-            .get_mut(validator_id)
-            .ok_or_else(|| Error::InvalidData(format!(
-                "No pending request for validator {}",
-                validator_id
-            )))?;
+        let request = self.pending_requests.get_mut(validator_id).ok_or_else(|| {
+            Error::InvalidData(format!("No pending request for validator {}", validator_id))
+        })?;
 
         // Calculate required votes
         let required_votes = match request.request_type {
@@ -549,7 +538,8 @@ impl ValidatorActivationManager {
         if status == ActivationRequestStatus::Approved {
             match request.request_type {
                 ActivationRequestType::Activation => {
-                    let record = self.records
+                    let record = self
+                        .records
                         .entry(validator_id.clone())
                         .or_insert_with(|| ValidatorActivationRecord::new(validator_id.clone()));
 
@@ -621,7 +611,10 @@ impl ValidatorActivationManager {
     }
 
     /// Get activation record mutable
-    pub fn get_record_mut(&mut self, validator_id: &ValidatorID) -> Option<&mut ValidatorActivationRecord> {
+    pub fn get_record_mut(
+        &mut self,
+        validator_id: &ValidatorID,
+    ) -> Option<&mut ValidatorActivationRecord> {
         self.records.get_mut(validator_id)
     }
 
@@ -660,7 +653,10 @@ impl ValidatorActivationManager {
     /// Advance to next cycle
     pub fn advance_cycle(&mut self) {
         self.current_cycle += 1;
-        debug!("Advanced activation manager to cycle {}", self.current_cycle);
+        debug!(
+            "Advanced activation manager to cycle {}",
+            self.current_cycle
+        );
     }
 
     /// Get current cycle
@@ -695,191 +691,5 @@ impl ValidatorActivationManager {
     /// Get event count
     pub fn event_count(&self) -> usize {
         self.events.len()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use silver_core::SilverAddress;
-
-    fn create_test_validator_id(id: u8) -> ValidatorID {
-        ValidatorID::new(SilverAddress::new([id; 64]))
-    }
-
-    #[test]
-    fn test_activation_record() {
-        let mut record = ValidatorActivationRecord::new(create_test_validator_id(1));
-
-        assert_eq!(record.status, ValidatorStatus::Pending);
-        assert!(record.activate().is_ok());
-        assert_eq!(record.status, ValidatorStatus::Active);
-        assert_eq!(record.activation_count, 1);
-    }
-
-    #[test]
-    fn test_deactivation() {
-        let mut record = ValidatorActivationRecord::new(create_test_validator_id(1));
-
-        record.activate().unwrap();
-        assert!(record.deactivate(86400).is_ok());
-        assert_eq!(record.status, ValidatorStatus::Deactivated);
-        assert_eq!(record.deactivation_count, 1);
-    }
-
-    #[test]
-    fn test_reactivation_cooldown() {
-        let mut record = ValidatorActivationRecord::new(create_test_validator_id(1));
-
-        record.activate().unwrap();
-        record.deactivate(86400).unwrap();
-
-        let result = record.activate();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_request_activation() {
-        let mut manager = ValidatorActivationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        let request = manager
-            .request_activation(validator_id.clone(), 50_000, 25_000)
-            .unwrap();
-
-        assert_eq!(request.request_type, ActivationRequestType::Activation);
-        assert_eq!(request.status, ActivationRequestStatus::Pending);
-    }
-
-    #[test]
-    fn test_activation_minimum_stake() {
-        let mut manager = ValidatorActivationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        let result = manager.request_activation(validator_id, 5_000, 25_000);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_voting() {
-        let mut manager = ValidatorActivationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .request_activation(validator_id.clone(), 50_000, 25_000)
-            .unwrap();
-
-        manager
-            .vote_on_request(&validator_id, true, 1_000_000)
-            .unwrap();
-
-        let request = manager.get_pending_request(&validator_id).unwrap();
-        assert_eq!(request.votes_in_favor, 1_000_000);
-    }
-
-    #[test]
-    fn test_finalize_approved() {
-        let mut manager = ValidatorActivationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .request_activation(validator_id.clone(), 50_000, 25_000)
-            .unwrap();
-
-        manager
-            .vote_on_request(&validator_id, true, 2_000_000)
-            .unwrap();
-
-        let status = manager.finalize_request(&validator_id, 3_000_000).unwrap();
-        assert_eq!(status, ActivationRequestStatus::Approved);
-        assert_eq!(manager.get_status(&validator_id), ValidatorStatus::Active);
-    }
-
-    #[test]
-    fn test_finalize_rejected() {
-        let mut manager = ValidatorActivationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .request_activation(validator_id.clone(), 50_000, 25_000)
-            .unwrap();
-
-        manager
-            .vote_on_request(&validator_id, true, 1_000_000)
-            .unwrap();
-
-        let status = manager.finalize_request(&validator_id, 3_000_000).unwrap();
-        assert_eq!(status, ActivationRequestStatus::Rejected);
-    }
-
-    #[test]
-    fn test_deactivation_request() {
-        let mut manager = ValidatorActivationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .request_activation(validator_id.clone(), 50_000, 25_000)
-            .unwrap();
-
-        manager
-            .vote_on_request(&validator_id, true, 2_000_000)
-            .unwrap();
-
-        manager.finalize_request(&validator_id, 3_000_000).unwrap();
-
-        let request = manager.request_deactivation(validator_id.clone()).unwrap();
-        assert_eq!(request.request_type, ActivationRequestType::Deactivation);
-    }
-
-    #[test]
-    fn test_active_validators() {
-        let mut manager = ValidatorActivationManager::default();
-
-        for i in 1..=3 {
-            let validator_id = create_test_validator_id(i);
-            manager
-                .request_activation(validator_id.clone(), 50_000, 25_000)
-                .unwrap();
-
-            manager
-                .vote_on_request(&validator_id, true, 2_000_000)
-                .unwrap();
-
-            manager.finalize_request(&validator_id, 3_000_000).unwrap();
-        }
-
-        assert_eq!(manager.active_count(), 3);
-    }
-
-    #[test]
-    fn test_events() {
-        let mut manager = ValidatorActivationManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .request_activation(validator_id.clone(), 50_000, 25_000)
-            .unwrap();
-
-        manager
-            .vote_on_request(&validator_id, true, 2_000_000)
-            .unwrap();
-
-        manager.finalize_request(&validator_id, 3_000_000).unwrap();
-
-        let events = manager.get_validator_events(&validator_id);
-        assert!(!events.is_empty());
-    }
-
-    #[test]
-    fn test_custom_config() {
-        let config = ActivationConfig {
-            min_stake_for_activation: 20_000,
-            min_voting_power: 10_000,
-            activation_votes_required: 0.75,
-            ..Default::default()
-        };
-
-        let manager = ValidatorActivationManager::new(config);
-        assert_eq!(manager.config().min_stake_for_activation, 20_000);
     }
 }

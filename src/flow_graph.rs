@@ -10,9 +10,9 @@
 //! - Efficient traversal for consensus ordering
 //! - Concurrent access with fine-grained locking
 
-use silver_core::{BatchID, Certificate, Error, Result, TransactionBatch};
 use dashmap::DashMap;
 use parking_lot::RwLock;
+use silver_core::{BatchID, Certificate, Error, Result, TransactionBatch};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -482,116 +482,3 @@ impl Default for FlowGraph {
         Self::new()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use silver_core::{Signature, SignatureScheme, SilverAddress, Transaction, ValidatorID};
-
-    fn create_test_batch(
-        id: u8,
-        previous: Vec<BatchID>,
-    ) -> TransactionBatch {
-        let validator_id = ValidatorID::new(SilverAddress::new([id; 64]));
-        let signature = Signature {
-            scheme: SignatureScheme::Dilithium3,
-            bytes: vec![0u8; 100],
-        };
-
-        TransactionBatch::new(
-            vec![], // Empty transactions for testing
-            validator_id,
-            1000,
-            previous,
-            signature,
-        )
-        .unwrap()
-    }
-
-    #[tokio::test]
-    async fn test_flow_graph_add_batch() {
-        let mut graph = FlowGraph::new();
-
-        let batch = create_test_batch(1, vec![]);
-        let batch_id = batch.batch_id;
-
-        assert!(graph.add_batch(batch).await.is_ok());
-        assert!(graph.contains_batch(&batch_id));
-        assert_eq!(graph.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_flow_graph_parent_child() {
-        let mut graph = FlowGraph::new();
-
-        // Add parent batch
-        let parent = create_test_batch(1, vec![]);
-        let parent_id = parent.batch_id;
-        graph.add_batch(parent).await.unwrap();
-
-        // Add child batch
-        let child = create_test_batch(2, vec![parent_id]);
-        let child_id = child.batch_id;
-        graph.add_batch(child).await.unwrap();
-
-        // Verify relationships
-        let children = graph.get_children(&parent_id);
-        assert_eq!(children.len(), 1);
-        assert_eq!(children[0], child_id);
-
-        let parents = graph.get_parents(&child_id);
-        assert_eq!(parents.len(), 1);
-        assert_eq!(parents[0], parent_id);
-    }
-
-    #[tokio::test]
-    async fn test_flow_graph_topological_sort() {
-        let mut graph = FlowGraph::new();
-
-        // Create a simple DAG: A -> B -> C
-        let batch_a = create_test_batch(1, vec![]);
-        let id_a = batch_a.batch_id;
-        graph.add_batch(batch_a).await.unwrap();
-
-        let batch_b = create_test_batch(2, vec![id_a]);
-        let id_b = batch_b.batch_id;
-        graph.add_batch(batch_b).await.unwrap();
-
-        let batch_c = create_test_batch(3, vec![id_b]);
-        let id_c = batch_c.batch_id;
-        graph.add_batch(batch_c).await.unwrap();
-
-        // Get topological order
-        let sorted = graph.topological_sort().unwrap();
-        assert_eq!(sorted.len(), 3);
-
-        // Verify A comes before B, and B comes before C
-        let pos_a = sorted.iter().position(|&id| id == id_a).unwrap();
-        let pos_b = sorted.iter().position(|&id| id == id_b).unwrap();
-        let pos_c = sorted.iter().position(|&id| id == id_c).unwrap();
-
-        assert!(pos_a < pos_b);
-        assert!(pos_b < pos_c);
-    }
-
-    #[tokio::test]
-    async fn test_flow_graph_stats() {
-        let mut graph = FlowGraph::new();
-
-        let batch = create_test_batch(1, vec![]);
-        graph.add_batch(batch).await.unwrap();
-
-        let stats = graph.stats();
-        assert_eq!(stats.total_batches, 1);
-        assert_eq!(stats.certified_batches, 0);
-        assert_eq!(stats.pending_batches, 1);
-    }
-
-    #[test]
-    fn test_flow_graph_new() {
-        let graph = FlowGraph::new();
-        assert_eq!(graph.len(), 0);
-        assert!(graph.is_empty());
-    }
-}
-

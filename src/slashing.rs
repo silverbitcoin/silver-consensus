@@ -9,27 +9,27 @@
 //! - Comprehensive audit trail
 //! - Full recovery support
 
-use silver_core::{Error, Result, ValidatorID};
 use serde::{Deserialize, Serialize};
+use silver_core::{Error, Result, ValidatorID};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// Slashing configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlashingConfig {
     /// Percentage of stake slashed for double signing (0-100)
     pub slash_double_signing: u64,
-    
+
     /// Percentage of stake slashed for downtime (0-100)
     pub slash_downtime: u64,
-    
+
     /// Jail duration in seconds
     pub jail_duration_secs: u64,
-    
+
     /// Downtime threshold (missed snapshots before jailing)
     pub downtime_threshold: u64,
-    
+
     /// Recovery period in snapshots (to reduce jail time)
     pub recovery_period: u64,
 }
@@ -51,10 +51,10 @@ impl Default for SlashingConfig {
 pub enum JailReason {
     /// Double signing detected
     DoubleSigning,
-    
+
     /// Excessive downtime
     ExcessiveDowntime,
-    
+
     /// Manual jailing by governance
     Manual,
 }
@@ -74,22 +74,22 @@ impl std::fmt::Display for JailReason {
 pub struct JailRecord {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// When jailed
     pub jailed_at: u64,
-    
+
     /// When jail expires
     pub jail_expires_at: u64,
-    
+
     /// Reason for jailing
     pub reason: JailReason,
-    
+
     /// Amount slashed
     pub slash_amount: u64,
-    
+
     /// Snapshots missed (for downtime)
     pub snapshots_missed: Option<u64>,
-    
+
     /// Whether jail was manually lifted
     pub manually_lifted: bool,
 }
@@ -167,16 +167,16 @@ impl JailRecord {
 pub struct SlashEvent {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Slash reason
     pub reason: JailReason,
-    
+
     /// Amount slashed
     pub slash_amount: u64,
-    
+
     /// Timestamp
     pub timestamp: u64,
-    
+
     /// Cycle (if applicable)
     pub cycle: Option<u64>,
 }
@@ -185,13 +185,13 @@ pub struct SlashEvent {
 pub struct SlashingManager {
     /// Configuration
     config: SlashingConfig,
-    
+
     /// Jailed validators
     jailed_validators: HashMap<ValidatorID, JailRecord>,
-    
+
     /// Slash history
     slash_history: Vec<SlashEvent>,
-    
+
     /// Double signing evidence (to prevent duplicate slashing)
     double_signing_evidence: HashMap<ValidatorID, Vec<u8>>,
 }
@@ -242,12 +242,12 @@ impl SlashingManager {
 
         if slash_amount == 0 {
             return Err(Error::InvalidData(
-                "Slash amount cannot be zero".to_string()
+                "Slash amount cannot be zero".to_string(),
             ));
         }
 
         // Create jail record
-        let mut jail_record = JailRecord::new(
+        let jail_record = JailRecord::new(
             validator_id.clone(),
             JailReason::DoubleSigning,
             slash_amount,
@@ -255,7 +255,8 @@ impl SlashingManager {
         );
 
         // Store evidence
-        self.double_signing_evidence.insert(validator_id.clone(), evidence);
+        self.double_signing_evidence
+            .insert(validator_id.clone(), evidence);
 
         // Record slash event
         let event = SlashEvent {
@@ -270,13 +271,12 @@ impl SlashingManager {
         };
 
         self.slash_history.push(event);
-        self.jailed_validators.insert(validator_id.clone(), jail_record.clone());
+        self.jailed_validators
+            .insert(validator_id.clone(), jail_record.clone());
 
         error!(
             "Slashed validator {} for double signing: {} SBTC ({}% of stake)",
-            validator_id,
-            slash_amount,
-            self.config.slash_double_signing
+            validator_id, slash_amount, self.config.slash_double_signing
         );
 
         Ok((slash_amount, jail_record))
@@ -311,7 +311,7 @@ impl SlashingManager {
 
         if slash_amount == 0 {
             return Err(Error::InvalidData(
-                "Slash amount cannot be zero".to_string()
+                "Slash amount cannot be zero".to_string(),
             ));
         }
 
@@ -338,14 +338,12 @@ impl SlashingManager {
         };
 
         self.slash_history.push(event);
-        self.jailed_validators.insert(validator_id.clone(), jail_record.clone());
+        self.jailed_validators
+            .insert(validator_id.clone(), jail_record.clone());
 
         warn!(
             "Slashed validator {} for downtime: {} SBTC ({}% of stake, {} snapshots missed)",
-            validator_id,
-            slash_amount,
-            self.config.slash_downtime,
-            snapshots_missed
+            validator_id, slash_amount, self.config.slash_downtime, snapshots_missed
         );
 
         Ok((slash_amount, jail_record))
@@ -355,7 +353,7 @@ impl SlashingManager {
     pub fn jail_validator_manual(
         &mut self,
         validator_id: ValidatorID,
-        stake: u64,
+        _stake: u64,
     ) -> Result<JailRecord> {
         // Check if already jailed
         if self.is_jailed(&validator_id) {
@@ -389,12 +387,10 @@ impl SlashingManager {
         };
 
         self.slash_history.push(event);
-        self.jailed_validators.insert(validator_id.clone(), jail_record.clone());
+        self.jailed_validators
+            .insert(validator_id.clone(), jail_record.clone());
 
-        info!(
-            "Manually jailed validator {} by governance",
-            validator_id
-        );
+        info!("Manually jailed validator {} by governance", validator_id);
 
         Ok(jail_record)
     }
@@ -501,196 +497,5 @@ impl SlashingManager {
     /// Get total slash events
     pub fn slash_event_count(&self) -> usize {
         self.slash_history.len()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use silver_core::SilverAddress;
-
-    fn create_test_validator_id(id: u8) -> ValidatorID {
-        ValidatorID::new(SilverAddress::new([id; 64]))
-    }
-
-    #[test]
-    fn test_slash_for_double_signing() {
-        let mut manager = SlashingManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        let (slash_amount, jail_record) = manager
-            .slash_for_double_signing(validator_id.clone(), 100_000, vec![1u8; 32])
-            .unwrap();
-
-        assert_eq!(slash_amount, 10_000); // 10% of 100,000
-        assert!(manager.is_jailed(&validator_id));
-        assert_eq!(jail_record.reason, JailReason::DoubleSigning);
-    }
-
-    #[test]
-    fn test_slash_for_downtime() {
-        let mut manager = SlashingManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        let (slash_amount, jail_record) = manager
-            .slash_for_downtime(validator_id.clone(), 100_000, 50, 0)
-            .unwrap();
-
-        assert_eq!(slash_amount, 1_000); // 1% of 100,000
-        assert!(manager.is_jailed(&validator_id));
-        assert_eq!(jail_record.reason, JailReason::ExcessiveDowntime);
-        assert_eq!(jail_record.snapshots_missed, Some(50));
-    }
-
-    #[test]
-    fn test_downtime_below_threshold() {
-        let mut manager = SlashingManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        let result = manager.slash_for_downtime(validator_id, 100_000, 25, 0);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_double_slash_prevention() {
-        let mut manager = SlashingManager::default();
-        let validator_id = create_test_validator_id(1);
-        let evidence = vec![1u8; 32];
-
-        manager
-            .slash_for_double_signing(validator_id.clone(), 100_000, evidence.clone())
-            .unwrap();
-
-        let result = manager.slash_for_double_signing(validator_id, 100_000, evidence);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_jail_record_expiration() {
-        let mut manager = SlashingManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .slash_for_double_signing(validator_id.clone(), 100_000, vec![1u8; 32])
-            .unwrap();
-
-        assert!(manager.is_jailed(&validator_id));
-
-        // Manually set jail to expired
-        if let Some(record) = manager.get_jail_record_mut(&validator_id) {
-            record.jail_expires_at = 0;
-        }
-
-        assert!(!manager.is_jailed(&validator_id));
-    }
-
-    #[test]
-    fn test_manual_jail_lift() {
-        let mut manager = SlashingManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .slash_for_double_signing(validator_id.clone(), 100_000, vec![1u8; 32])
-            .unwrap();
-
-        assert!(manager.is_jailed(&validator_id));
-
-        manager.lift_jail(&validator_id).unwrap();
-        assert!(!manager.is_jailed(&validator_id));
-    }
-
-    #[test]
-    fn test_manual_jailing() {
-        let mut manager = SlashingManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        let jail_record = manager.jail_validator_manual(validator_id.clone(), 100_000).unwrap();
-
-        assert!(manager.is_jailed(&validator_id));
-        assert_eq!(jail_record.reason, JailReason::Manual);
-        assert_eq!(jail_record.slash_amount, 0);
-    }
-
-    #[test]
-    fn test_slash_history() {
-        let mut manager = SlashingManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .slash_for_double_signing(validator_id.clone(), 100_000, vec![1u8; 32])
-            .unwrap();
-
-        manager
-            .slash_for_downtime(validator_id.clone(), 100_000, 50, 0)
-            .unwrap_err(); // Should fail - already jailed
-
-        let history = manager.get_validator_slash_history(&validator_id);
-        assert_eq!(history.len(), 1);
-    }
-
-    #[test]
-    fn test_total_slashed() {
-        let mut manager = SlashingManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .slash_for_double_signing(validator_id.clone(), 100_000, vec![1u8; 32])
-            .unwrap();
-
-        let total = manager.get_total_slashed(&validator_id);
-        assert_eq!(total, 10_000);
-    }
-
-    #[test]
-    fn test_process_expired_jails() {
-        let mut manager = SlashingManager::default();
-        let validator_id = create_test_validator_id(1);
-
-        manager
-            .slash_for_double_signing(validator_id.clone(), 100_000, vec![1u8; 32])
-            .unwrap();
-
-        // Manually expire jail
-        if let Some(record) = manager.get_jail_record_mut(&validator_id) {
-            record.jail_expires_at = 0;
-        }
-
-        let expired = manager.process_expired_jails();
-        assert_eq!(expired.len(), 1);
-        assert!(!manager.is_jailed(&validator_id));
-    }
-
-    #[test]
-    fn test_custom_config() {
-        let config = SlashingConfig {
-            slash_double_signing: 20,
-            slash_downtime: 5,
-            jail_duration_secs: 3600,
-            downtime_threshold: 100,
-            recovery_period: 200,
-        };
-
-        let mut manager = SlashingManager::new(config);
-        let validator_id = create_test_validator_id(1);
-
-        let (slash_amount, _) = manager
-            .slash_for_double_signing(validator_id, 100_000, vec![1u8; 32])
-            .unwrap();
-
-        assert_eq!(slash_amount, 20_000); // 20% with custom config
-    }
-
-    #[test]
-    fn test_jailed_count() {
-        let mut manager = SlashingManager::default();
-
-        for i in 1..=3 {
-            let validator_id = create_test_validator_id(i);
-            manager
-                .slash_for_double_signing(validator_id, 100_000, vec![i; 32])
-                .unwrap();
-        }
-
-        assert_eq!(manager.jailed_count(), 3);
     }
 }

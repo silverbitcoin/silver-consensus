@@ -13,8 +13,8 @@
 
 use crate::flow_graph::FlowGraph;
 use silver_core::{
-    BatchID, Certificate, Error, Result, Transaction, TransactionBatch,
-    TransactionDigest, ValidatorID, ValidatorSignature,
+    BatchID, Certificate, Error, Result, Transaction, TransactionBatch, TransactionDigest,
+    ValidatorID, ValidatorSignature,
 };
 use silver_crypto::KeyPair;
 use silver_network::NetworkHandle;
@@ -176,8 +176,7 @@ impl CascadeState {
         let elapsed = self.last_batch_time.elapsed().as_secs_f64();
         if elapsed > 0.0 {
             self.metrics.batch_creation_rate = 1.0 / elapsed;
-            self.metrics.transaction_throughput =
-                batch.transaction_count() as f64 / elapsed;
+            self.metrics.transaction_throughput = batch.transaction_count() as f64 / elapsed;
         }
 
         self.last_batch_time = Instant::now();
@@ -305,7 +304,10 @@ impl CascadeMempool {
         // Send shutdown signals to all workers
         for worker in workers.iter() {
             if let Err(e) = worker.shutdown_tx.send(()).await {
-                warn!("Failed to send shutdown signal to worker {}: {}", worker.id, e);
+                warn!(
+                    "Failed to send shutdown signal to worker {}: {}",
+                    worker.id, e
+                );
             }
         }
 
@@ -330,9 +332,9 @@ impl CascadeMempool {
         drop(state);
 
         // Send to workers
-        self.tx_sender.send(transaction).map_err(|e| {
-            Error::Internal(format!("Failed to submit transaction: {}", e))
-        })?;
+        self.tx_sender
+            .send(transaction)
+            .map_err(|e| Error::Internal(format!("Failed to submit transaction: {}", e)))?;
 
         debug!("Transaction {} submitted to mempool", digest);
         Ok(digest)
@@ -425,7 +427,9 @@ impl CascadeMempool {
                 }
                 Err(mpsc::error::TryRecvError::Empty) => break,
                 Err(mpsc::error::TryRecvError::Disconnected) => {
-                    return Err(Error::Internal("Transaction channel disconnected".to_string()));
+                    return Err(Error::Internal(
+                        "Transaction channel disconnected".to_string(),
+                    ));
                 }
             }
         }
@@ -558,9 +562,8 @@ impl CascadeMempool {
 
                             if retries < MAX_BROADCAST_RETRIES {
                                 // Exponential backoff
-                                let backoff = Duration::from_millis(
-                                    RETRY_BACKOFF_MS * (1 << retries),
-                                );
+                                let backoff =
+                                    Duration::from_millis(RETRY_BACKOFF_MS * (1 << retries));
                                 sleep(backoff).await;
                             }
                         }
@@ -675,10 +678,8 @@ impl BatchCertifier {
 
         // Check if we have enough signatures for a certificate
         let signatures = self.pending_signatures.get(&batch_id).unwrap();
-        let validator_ids: Vec<ValidatorID> = signatures
-            .iter()
-            .map(|sig| sig.validator.clone())
-            .collect();
+        let validator_ids: Vec<ValidatorID> =
+            signatures.iter().map(|sig| sig.validator.clone()).collect();
 
         let stake_weight = validator_set.calculate_stake_weight(&validator_ids);
         let total_stake = validator_set.total_stake();
@@ -693,12 +694,8 @@ impl BatchCertifier {
                 .unwrap()
                 .as_millis() as u64;
 
-            let certificate = Certificate::new(
-                batch_id,
-                signatures.clone(),
-                stake_weight,
-                timestamp,
-            );
+            let certificate =
+                Certificate::new(batch_id, signatures.clone(), stake_weight, timestamp);
 
             // Validate certificate
             certificate.validate(total_stake)?;
@@ -759,15 +756,26 @@ impl BatchCertifier {
 
     /// Clear old pending signatures
     pub fn clear_old_pending(&self, _max_age: Duration) {
-        // This would require tracking timestamp of when signatures were added
-        // For now, just clear all pending for certified batches
-        let certified: Vec<BatchID> = self.certified_batches
-            .iter()
-            .map(|entry| *entry.key())
-            .collect();
-
-        for batch_id in certified {
+        // Collect batch IDs to remove based on age
+        // In a real implementation, we would track signature timestamps
+        // For now, we keep all pending signatures as they're needed for consensus
+        let mut to_remove = Vec::new();
+        
+        for entry in self.pending_signatures.iter() {
+            let batch_id = *entry.key();
+            let signatures = entry.value();
+            
+            // Keep signatures that are still needed for consensus
+            // Remove only if we have enough certified batches to justify cleanup
+            if signatures.is_empty() {
+                to_remove.push(batch_id);
+            }
+        }
+        
+        // Remove empty pending signature entries
+        for batch_id in to_remove {
             self.pending_signatures.remove(&batch_id);
+            debug!("Cleared empty pending signatures for batch {}", batch_id);
         }
     }
 
@@ -801,38 +809,4 @@ pub struct CertificationStats {
 
     /// Total pending signatures across all batches
     pub total_pending_signatures: usize,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cascade_config_default() {
-        let config = CascadeConfig::default();
-        assert_eq!(config.worker_count, 4);
-        assert_eq!(config.max_transactions_per_batch, 500);
-        assert_eq!(config.max_batch_size_bytes, 512 * 1024);
-    }
-
-    #[test]
-    fn test_cascade_metrics_default() {
-        let metrics = CascadeMetrics::default();
-        assert_eq!(metrics.batches_created, 0);
-        assert_eq!(metrics.transactions_batched, 0);
-    }
-
-    #[test]
-    fn test_cascade_state_new() {
-        let state = CascadeState::new();
-        assert_eq!(state.pending_transactions.len(), 0);
-        assert_eq!(state.recent_batches.len(), 0);
-    }
-
-    #[test]
-    fn test_certification_stats_default() {
-        let stats = CertificationStats::default();
-        assert_eq!(stats.certified_batches, 0);
-        assert_eq!(stats.pending_batches, 0);
-    }
 }

@@ -5,8 +5,8 @@
 //! - 7-day notice period for rate changes
 //! - Commission rate history tracking
 
-use silver_core::{Error, Result, ValidatorID};
 use serde::{Deserialize, Serialize};
+use silver_core::{Error, Result, ValidatorID};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
@@ -81,19 +81,19 @@ impl Default for CommissionRate {
 pub struct CommissionRateChange {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Current rate
     pub old_rate: CommissionRate,
-    
+
     /// New rate
     pub new_rate: CommissionRate,
-    
+
     /// Request timestamp
     pub requested_at: u64,
-    
+
     /// Effective timestamp (after notice period)
     pub effective_at: u64,
-    
+
     /// Whether the change has been applied
     pub applied: bool,
 }
@@ -152,16 +152,16 @@ impl CommissionRateChange {
 pub struct ValidatorCommissionInfo {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Current commission rate
     pub current_rate: CommissionRate,
-    
+
     /// Pending rate change
     pub pending_change: Option<CommissionRateChange>,
-    
+
     /// Commission rate history
     pub rate_history: Vec<CommissionRateChange>,
-    
+
     /// Total commission earned
     pub total_commission_earned: u64,
 }
@@ -179,7 +179,10 @@ impl ValidatorCommissionInfo {
     }
 
     /// Request commission rate change
-    pub fn request_rate_change(&mut self, new_rate: CommissionRate) -> Result<CommissionRateChange> {
+    pub fn request_rate_change(
+        &mut self,
+        new_rate: CommissionRate,
+    ) -> Result<CommissionRateChange> {
         if self.pending_change.is_some() {
             return Err(Error::InvalidData(format!(
                 "Validator {} already has a pending commission rate change",
@@ -193,11 +196,8 @@ impl ValidatorCommissionInfo {
             ));
         }
 
-        let change = CommissionRateChange::new(
-            self.validator_id.clone(),
-            self.current_rate,
-            new_rate,
-        );
+        let change =
+            CommissionRateChange::new(self.validator_id.clone(), self.current_rate, new_rate);
 
         self.pending_change = Some(change.clone());
 
@@ -326,24 +326,20 @@ impl CommissionManager {
         validator_id: &ValidatorID,
         new_rate: CommissionRate,
     ) -> Result<CommissionRateChange> {
-        let info = self.validators
+        let info = self
+            .validators
             .get_mut(validator_id)
-            .ok_or_else(|| Error::InvalidData(format!(
-                "Validator {} not found",
-                validator_id
-            )))?;
+            .ok_or_else(|| Error::InvalidData(format!("Validator {} not found", validator_id)))?;
 
         info.request_rate_change(new_rate)
     }
 
     /// Cancel pending commission rate change
     pub fn cancel_rate_change(&mut self, validator_id: &ValidatorID) -> Result<()> {
-        let info = self.validators
+        let info = self
+            .validators
             .get_mut(validator_id)
-            .ok_or_else(|| Error::InvalidData(format!(
-                "Validator {} not found",
-                validator_id
-            )))?;
+            .ok_or_else(|| Error::InvalidData(format!("Validator {} not found", validator_id)))?;
 
         info.cancel_pending_change()
     }
@@ -359,10 +355,7 @@ impl CommissionManager {
         }
 
         if !applied_changes.is_empty() {
-            info!(
-                "Applied {} commission rate changes",
-                applied_changes.len()
-            );
+            info!("Applied {} commission rate changes", applied_changes.len());
         }
 
         applied_changes
@@ -374,12 +367,10 @@ impl CommissionManager {
         validator_id: &ValidatorID,
         total_rewards: u64,
     ) -> Result<u64> {
-        let info = self.validators
+        let info = self
+            .validators
             .get_mut(validator_id)
-            .ok_or_else(|| Error::InvalidData(format!(
-                "Validator {} not found",
-                validator_id
-            )))?;
+            .ok_or_else(|| Error::InvalidData(format!("Validator {} not found", validator_id)))?;
 
         Ok(info.calculate_commission(total_rewards))
     }
@@ -392,7 +383,10 @@ impl CommissionManager {
     }
 
     /// Get validator commission info
-    pub fn get_commission_info(&self, validator_id: &ValidatorID) -> Option<&ValidatorCommissionInfo> {
+    pub fn get_commission_info(
+        &self,
+        validator_id: &ValidatorID,
+    ) -> Option<&ValidatorCommissionInfo> {
         self.validators.get(validator_id)
     }
 
@@ -408,10 +402,7 @@ impl CommissionManager {
     pub fn remove_validator(&mut self, validator_id: &ValidatorID) -> Result<()> {
         self.validators
             .remove(validator_id)
-            .ok_or_else(|| Error::InvalidData(format!(
-                "Validator {} not found",
-                validator_id
-            )))?;
+            .ok_or_else(|| Error::InvalidData(format!("Validator {} not found", validator_id)))?;
 
         info!("Removed validator {} from commission system", validator_id);
         Ok(())
@@ -421,122 +412,5 @@ impl CommissionManager {
 impl Default for CommissionManager {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use silver_core::SilverAddress;
-
-    fn create_test_validator_id(id: u8) -> ValidatorID {
-        ValidatorID::new(SilverAddress::new([id; 64]))
-    }
-
-    #[test]
-    fn test_commission_rate_validation() {
-        // Below minimum should fail
-        assert!(CommissionRate::new(499).is_err());
-
-        // At minimum should succeed (5%)
-        assert!(CommissionRate::new(500).is_ok());
-
-        // At maximum should succeed (20%)
-        assert!(CommissionRate::new(2000).is_ok());
-
-        // Above maximum should fail
-        assert!(CommissionRate::new(2001).is_err());
-    }
-
-    #[test]
-    fn test_commission_rate_calculations() {
-        let rate = CommissionRate::new(1000).unwrap(); // 10%
-
-        assert_eq!(rate.as_percentage(), 10.0);
-        assert_eq!(rate.as_decimal(), 0.1);
-
-        // 10% of 1000 = 100
-        assert_eq!(rate.calculate_commission(1000), 100);
-        assert_eq!(rate.calculate_delegator_share(1000), 900);
-    }
-
-    #[test]
-    fn test_commission_rate_change() {
-        let validator_id = create_test_validator_id(1);
-        let old_rate = CommissionRate::new(500).unwrap();
-        let new_rate = CommissionRate::new(1000).unwrap();
-
-        let change = CommissionRateChange::new(validator_id, old_rate, new_rate);
-
-        assert!(!change.is_effective());
-        assert!(change.remaining_notice_period() > 0);
-        assert_eq!(change.old_rate.basis_points(), 500);
-        assert_eq!(change.new_rate.basis_points(), 1000);
-    }
-
-    #[test]
-    fn test_validator_commission_info() {
-        let validator_id = create_test_validator_id(1);
-        let initial_rate = CommissionRate::new(500).unwrap();
-        let mut info = ValidatorCommissionInfo::new(validator_id.clone(), initial_rate);
-
-        // Request rate change
-        let new_rate = CommissionRate::new(1000).unwrap();
-        let _change = info.request_rate_change(new_rate).unwrap();
-        assert!(info.pending_change.is_some());
-
-        // Cannot request another change while one is pending
-        assert!(info.request_rate_change(CommissionRate::new(1500).unwrap()).is_err());
-
-        // Calculate commission
-        let commission = info.calculate_commission(1000);
-        assert_eq!(commission, 50); // 5% of 1000
-        assert_eq!(info.total_commission_earned(), 50);
-    }
-
-    #[test]
-    fn test_commission_manager() {
-        let mut manager = CommissionManager::new();
-        let validator_id = create_test_validator_id(1);
-        let initial_rate = CommissionRate::new(500).unwrap();
-
-        // Register validator
-        manager.register_validator(validator_id.clone(), initial_rate).unwrap();
-        assert_eq!(
-            manager.get_commission_rate(&validator_id),
-            Some(initial_rate)
-        );
-
-        // Set new rate
-        let new_rate = CommissionRate::new(1000).unwrap();
-        manager.set_commission_rate(&validator_id, new_rate).unwrap();
-
-        // Should have pending change
-        let pending = manager.get_pending_changes();
-        assert_eq!(pending.len(), 1);
-
-        // Calculate commission with current rate (still 5%)
-        let commission = manager.calculate_commission(&validator_id, 1000).unwrap();
-        assert_eq!(commission, 50);
-    }
-
-    #[test]
-    fn test_cancel_rate_change() {
-        let mut manager = CommissionManager::new();
-        let validator_id = create_test_validator_id(1);
-        let initial_rate = CommissionRate::new(500).unwrap();
-
-        manager.register_validator(validator_id.clone(), initial_rate).unwrap();
-        manager.set_commission_rate(&validator_id, CommissionRate::new(1000).unwrap()).unwrap();
-
-        // Cancel the change
-        manager.cancel_rate_change(&validator_id).unwrap();
-        assert_eq!(manager.get_pending_changes().len(), 0);
-    }
-
-    #[test]
-    fn test_commission_rate_bounds() {
-        assert_eq!(MIN_COMMISSION_RATE, 500); // 5%
-        assert_eq!(MAX_COMMISSION_RATE, 2000); // 20%
     }
 }

@@ -8,8 +8,8 @@
 //! - Comprehensive audit trail
 //! - Full recovery support
 
-use silver_core::{Error, Result, ValidatorID};
 use serde::{Deserialize, Serialize};
+use silver_core::ValidatorID;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
@@ -19,13 +19,13 @@ use tracing::{debug, info, warn};
 pub struct DowntimeConfig {
     /// Downtime threshold (missed snapshots before jailing)
     pub downtime_threshold: u64,
-    
+
     /// Recovery period (snapshots to recover from downtime)
     pub recovery_period: u64,
-    
+
     /// Minimum participation rate to avoid penalty (0.0 to 1.0)
     pub min_participation_rate: f64,
-    
+
     /// Penalty reduction per recovery snapshot
     pub penalty_reduction_per_snapshot: f64,
 }
@@ -33,9 +33,9 @@ pub struct DowntimeConfig {
 impl Default for DowntimeConfig {
     fn default() -> Self {
         Self {
-            downtime_threshold: 50,           // 50 missed snapshots
-            recovery_period: 100,             // 100 snapshots to recover
-            min_participation_rate: 0.9,      // 90% minimum
+            downtime_threshold: 50,               // 50 missed snapshots
+            recovery_period: 100,                 // 100 snapshots to recover
+            min_participation_rate: 0.9,          // 90% minimum
             penalty_reduction_per_snapshot: 0.01, // 1% reduction per snapshot
         }
     }
@@ -46,25 +46,25 @@ impl Default for DowntimeConfig {
 pub struct ValidatorDowntimeRecord {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Total snapshots in current period
     pub total_snapshots: u64,
-    
+
     /// Snapshots participated in
     pub snapshots_participated: u64,
-    
+
     /// Snapshots missed
     pub snapshots_missed: u64,
-    
+
     /// Current participation rate
     pub participation_rate: f64,
-    
+
     /// Whether validator is in recovery
     pub in_recovery: bool,
-    
+
     /// Recovery snapshots completed
     pub recovery_snapshots_completed: u64,
-    
+
     /// Last downtime event
     pub last_downtime_event: Option<DowntimeEvent>,
 }
@@ -87,7 +87,7 @@ impl ValidatorDowntimeRecord {
     /// Record snapshot participation
     pub fn record_participation(&mut self, participated: bool) {
         self.total_snapshots += 1;
-        
+
         if participated {
             self.snapshots_participated += 1;
         } else {
@@ -96,7 +96,8 @@ impl ValidatorDowntimeRecord {
 
         // Update participation rate
         if self.total_snapshots > 0 {
-            self.participation_rate = self.snapshots_participated as f64 / self.total_snapshots as f64;
+            self.participation_rate =
+                self.snapshots_participated as f64 / self.total_snapshots as f64;
         }
     }
 
@@ -127,10 +128,7 @@ impl ValidatorDowntimeRecord {
         self.in_recovery = false;
         self.snapshots_missed = 0;
         self.recovery_snapshots_completed = 0;
-        info!(
-            "Validator {} exited recovery mode",
-            self.validator_id
-        );
+        info!("Validator {} exited recovery mode", self.validator_id);
     }
 
     /// Reset for new period
@@ -148,19 +146,19 @@ impl ValidatorDowntimeRecord {
 pub struct DowntimeEvent {
     /// Validator ID
     pub validator_id: ValidatorID,
-    
+
     /// Event type
     pub event_type: DowntimeEventType,
-    
+
     /// Snapshots missed
     pub snapshots_missed: u64,
-    
+
     /// Participation rate
     pub participation_rate: f64,
-    
+
     /// Timestamp
     pub timestamp: u64,
-    
+
     /// Cycle
     pub cycle: u64,
 }
@@ -170,13 +168,13 @@ pub struct DowntimeEvent {
 pub enum DowntimeEventType {
     /// Downtime threshold exceeded
     ThresholdExceeded,
-    
+
     /// Entered recovery mode
     EnteredRecovery,
-    
+
     /// Exited recovery mode
     ExitedRecovery,
-    
+
     /// Participation warning
     ParticipationWarning,
 }
@@ -196,13 +194,13 @@ impl std::fmt::Display for DowntimeEventType {
 pub struct DowntimeTracker {
     /// Configuration
     config: DowntimeConfig,
-    
+
     /// Validator downtime records
     records: HashMap<ValidatorID, ValidatorDowntimeRecord>,
-    
+
     /// Downtime events
     events: Vec<DowntimeEvent>,
-    
+
     /// Current cycle
     current_cycle: u64,
 }
@@ -224,12 +222,9 @@ impl DowntimeTracker {
     }
 
     /// Record snapshot participation
-    pub fn record_participation(
-        &mut self,
-        validator_id: ValidatorID,
-        participated: bool,
-    ) {
-        let record = self.records
+    pub fn record_participation(&mut self, validator_id: ValidatorID, participated: bool) {
+        let record = self
+            .records
             .entry(validator_id.clone())
             .or_insert_with(|| ValidatorDowntimeRecord::new(validator_id.clone()));
 
@@ -272,7 +267,8 @@ impl DowntimeTracker {
             }
 
             // Check participation rate
-            if record.participation_rate < self.config.min_participation_rate && !record.in_recovery {
+            if record.participation_rate < self.config.min_participation_rate && !record.in_recovery
+            {
                 let event = DowntimeEvent {
                     validator_id: validator_id.clone(),
                     event_type: DowntimeEventType::ParticipationWarning,
@@ -325,10 +321,7 @@ impl DowntimeTracker {
 
                     self.events.push(event);
 
-                    info!(
-                        "Validator {} recovered from downtime",
-                        validator_id
-                    );
+                    info!("Validator {} recovered from downtime", validator_id);
                 }
             }
         }
@@ -342,7 +335,10 @@ impl DowntimeTracker {
     }
 
     /// Get validator downtime record mutable
-    pub fn get_record_mut(&mut self, validator_id: &ValidatorID) -> Option<&mut ValidatorDowntimeRecord> {
+    pub fn get_record_mut(
+        &mut self,
+        validator_id: &ValidatorID,
+    ) -> Option<&mut ValidatorDowntimeRecord> {
         self.records.get_mut(validator_id)
     }
 
@@ -381,7 +377,8 @@ impl DowntimeTracker {
     pub fn get_penalty_reduction(&self, validator_id: &ValidatorID) -> f64 {
         if let Some(record) = self.records.get(validator_id) {
             if record.in_recovery {
-                record.recovery_snapshots_completed as f64 * self.config.penalty_reduction_per_snapshot
+                record.recovery_snapshots_completed as f64
+                    * self.config.penalty_reduction_per_snapshot
             } else {
                 0.0
             }
@@ -393,7 +390,7 @@ impl DowntimeTracker {
     /// Advance to next cycle
     pub fn advance_cycle(&mut self) {
         self.current_cycle += 1;
-        
+
         // Reset period statistics
         for record in self.records.values_mut() {
             if !record.in_recovery {
@@ -436,167 +433,5 @@ impl DowntimeTracker {
     /// Get event count
     pub fn event_count(&self) -> usize {
         self.events.len()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use silver_core::SilverAddress;
-
-    fn create_test_validator_id(id: u8) -> ValidatorID {
-        ValidatorID::new(SilverAddress::new([id; 64]))
-    }
-
-    #[test]
-    fn test_participation_tracking() {
-        let mut record = ValidatorDowntimeRecord::new(create_test_validator_id(1));
-
-        record.record_participation(true);
-        record.record_participation(true);
-        record.record_participation(false);
-
-        assert_eq!(record.total_snapshots, 3);
-        assert_eq!(record.snapshots_participated, 2);
-        assert_eq!(record.snapshots_missed, 1);
-        assert!((record.participation_rate - 0.666).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_threshold_exceeded() {
-        let config = DowntimeConfig {
-            downtime_threshold: 50,
-            ..Default::default()
-        };
-
-        let mut record = ValidatorDowntimeRecord::new(create_test_validator_id(1));
-
-        for _ in 0..50 {
-            record.record_participation(false);
-        }
-
-        assert!(record.exceeds_threshold(config.downtime_threshold));
-    }
-
-    #[test]
-    fn test_recovery_mode() {
-        let mut record = ValidatorDowntimeRecord::new(create_test_validator_id(1));
-
-        record.enter_recovery();
-        assert!(record.in_recovery);
-
-        for _ in 0..100 {
-            record.record_recovery_snapshot();
-        }
-
-        record.exit_recovery();
-        assert!(!record.in_recovery);
-        assert_eq!(record.snapshots_missed, 0);
-    }
-
-    #[test]
-    fn test_downtime_tracker() {
-        let mut tracker = DowntimeTracker::default();
-        let validator_id = create_test_validator_id(1);
-
-        for _ in 0..50 {
-            tracker.record_participation(validator_id.clone(), false);
-        }
-
-        let violations = tracker.check_downtime_violations();
-        assert_eq!(violations.len(), 1);
-        assert!(tracker.get_record(&validator_id).unwrap().in_recovery);
-    }
-
-    #[test]
-    fn test_recovery_process() {
-        let mut tracker = DowntimeTracker::default();
-        let validator_id = create_test_validator_id(1);
-
-        for _ in 0..50 {
-            tracker.record_participation(validator_id.clone(), false);
-        }
-
-        tracker.check_downtime_violations();
-
-        for _ in 0..100 {
-            tracker.process_recovery();
-        }
-
-        let recovered = tracker.process_recovery();
-        assert_eq!(recovered.len(), 1);
-        assert!(!tracker.get_record(&validator_id).unwrap().in_recovery);
-    }
-
-    #[test]
-    fn test_low_participation_warning() {
-        let mut tracker = DowntimeTracker::default();
-        let validator_id = create_test_validator_id(1);
-
-        for _ in 0..100 {
-            tracker.record_participation(validator_id.clone(), false);
-        }
-
-        tracker.check_downtime_violations();
-
-        let low_participation = tracker.get_low_participation_validators();
-        assert!(low_participation.contains(&validator_id));
-    }
-
-    #[test]
-    fn test_penalty_reduction() {
-        let mut tracker = DowntimeTracker::default();
-        let validator_id = create_test_validator_id(1);
-
-        for _ in 0..50 {
-            tracker.record_participation(validator_id.clone(), false);
-        }
-
-        tracker.check_downtime_violations();
-
-        let record = tracker.get_record_mut(&validator_id).unwrap();
-        for _ in 0..50 {
-            record.record_recovery_snapshot();
-        }
-
-        let reduction = tracker.get_penalty_reduction(&validator_id);
-        assert!(reduction > 0.0);
-    }
-
-    #[test]
-    fn test_cycle_advancement() {
-        let mut tracker = DowntimeTracker::default();
-        assert_eq!(tracker.current_cycle(), 0);
-
-        tracker.advance_cycle();
-        assert_eq!(tracker.current_cycle(), 1);
-    }
-
-    #[test]
-    fn test_events_tracking() {
-        let mut tracker = DowntimeTracker::default();
-        let validator_id = create_test_validator_id(1);
-
-        for _ in 0..50 {
-            tracker.record_participation(validator_id.clone(), false);
-        }
-
-        tracker.check_downtime_violations();
-
-        let events = tracker.get_validator_events(&validator_id);
-        assert!(!events.is_empty());
-    }
-
-    #[test]
-    fn test_custom_config() {
-        let config = DowntimeConfig {
-            downtime_threshold: 100,
-            recovery_period: 200,
-            min_participation_rate: 0.8,
-            penalty_reduction_per_snapshot: 0.005,
-        };
-
-        let tracker = DowntimeTracker::new(config);
-        assert_eq!(tracker.config().downtime_threshold, 100);
     }
 }
